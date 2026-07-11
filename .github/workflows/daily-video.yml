@@ -1,0 +1,89 @@
+name: Daily AI YouTube Video
+
+# 1 video per day. GitHub cron is UTC (03:30 UTC = 09:00 IST) and may be
+# delayed a few minutes. "Run workflow" in the Actions tab triggers it manually.
+on:
+  schedule:
+    - cron: "30 3 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: daily-video
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install ffmpeg, fonts, espeak (offline voice fallback)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fonts-dejavu-core espeak-ng
+
+      - name: Install Python deps
+        run: pip install -r requirements.txt
+
+      # Local LLM runs ON this runner (CPU) when cloud APIs are missing/down.
+      # Prebuilt CPU wheel first; source build as fallback. If both fail the
+      # pipeline still works via its other providers, so keep going.
+      - name: Install llama-cpp-python (local LLM engine)
+        continue-on-error: true
+        run: |
+          pip install llama-cpp-python \
+            --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu \
+            || pip install llama-cpp-python
+
+      # ~2 GB LLM + ~63 MB Piper voice download once, then restore from cache.
+      - name: Cache local models
+        uses: actions/cache@v4
+        with:
+          path: models
+          key: local-models-v2
+
+      - name: Generate video (and upload if secrets are set)
+        env:
+          # topic source (optional — falls back to topics.csv, then built-ins)
+          SHEET_ID: ${{ secrets.SHEET_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          # script providers (all optional)
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          LOCAL_LLM: "1"
+          LOCAL_LLM_REPO: Qwen/Qwen2.5-7B-Instruct-GGUF
+          LOCAL_LLM_FILE: qwen2.5-7b-instruct-q3_k_m.gguf
+          # visual providers (all optional)
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+          # youtube upload (optional — without these the video is artifact-only)
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+        run: python main.py
+
+      # The rendered video + metadata are ALWAYS downloadable from the run
+      # page, even when every external API was unreachable or upload failed.
+      - name: Upload video artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: video-output
+          path: |
+            output/final.mp4
+            output/metadata.json
+            output/subs.srt
+          if-no-files-found: warn
+          retention-days: 7

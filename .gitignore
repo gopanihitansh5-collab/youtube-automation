@@ -1,0 +1,13 @@
+output/
+models/
+*.mp3
+*.mp4
+*.m4a
+*.srt
+# ...but DO commit background music you drop into assets/music/
+!assets/music/*
+client_secret.json
+service_account.json
+__pycache__/
+*.pyc
+.env
