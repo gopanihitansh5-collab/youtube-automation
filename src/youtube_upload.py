@@ -3,33 +3,37 @@
 No browser needed at runtime: we mint a refresh token once locally with
 scripts/get_youtube_token.py, store it as a repo secret, and exchange it for
 a short-lived access token on every run.
+
+Comment pinning uses a SEPARATE service instance (with force-ssl scope) so it
+gracefully degrades when the token only has youtube.upload scope.
 """
 import os
-import time
 
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-SCOPES = ["https://www.googleapis.com/auth/youtube.upload",
-          "https://www.googleapis.com/auth/youtube.force-ssl"]
+SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
 VALID_PRIVACY = {"public", "unlisted", "private"}
 
 
-def _service(scopes=None):
-    """Build a YouTube API service with the given scopes (default SCOPES)."""
+def _service(extra_scopes=None):
+    """Build a YouTube API service with upload scope + optional extras."""
     refresh = os.environ.get("YT_REFRESH_TOKEN")
     cid = os.environ.get("YT_CLIENT_ID")
     secret = os.environ.get("YT_CLIENT_SECRET")
     if not all([refresh, cid, secret]):
         return None
+    scopes = list(SCOPES)
+    if extra_scopes:
+        scopes.extend(extra_scopes)
     creds = Credentials(
         token=None,
         refresh_token=refresh,
         client_id=cid,
         client_secret=secret,
         token_uri="https://oauth2.googleapis.com/token",
-        scopes=scopes or SCOPES,
+        scopes=scopes,
     )
     return build("youtube", "v3", credentials=creds)
 
@@ -44,7 +48,7 @@ def upload(path, title, description, tags, privacy="public"):
             "title": (title or "Untitled")[:100],
             "description": description or "",
             "tags": tags or [],
-            "categoryId": "22",  # People & Blogs
+            "categoryId": "22",
         },
         "status": {
             "privacyStatus": privacy if privacy in VALID_PRIVACY else "public",
@@ -64,50 +68,49 @@ def upload(path, title, description, tags, privacy="public"):
 
     video_id = response["id"]
 
-    # Pin a comment with the hook (best-effort)
-    _pin_comment(youtube, video_id)
+    _pin_comment(video_id)
 
     return f"https://youtu.be/{video_id}"
 
 
-def _pin_comment(youtube, video_id, text=None):
-    """Pin a top-level comment on the just-uploaded video.
-    Gracefully skips if the token doesn't have the 'force-ssl' scope."""
+def _pin_comment(video_id, text=None):
+    """Pin a comment on the uploaded video (separate service with force-ssl).
+    Gracefully skips if the token only has youtube.upload scope."""
+    if not text:
+        text = "What did you think? Drop your thoughts below! " \
+               "Don't forget to subscribe for more daily insights "
     try:
-        comment_text = text or (
-            "What did you think? Drop your thoughts below! "
-            "Don't forget to subscribe for more daily insights \U0001f525")
-        resp = youtube.commentThreads().insert(
+        svc = _service(extra_scopes=[
+            "https://www.googleapis.com/auth/youtube.force-ssl"])
+        if not svc:
+            return
+        resp = svc.commentThreads().insert(
             part="snippet",
             body={
                 "snippet": {
                     "videoId": video_id,
                     "topLevelComment": {
-                        "snippet": {"textOriginal": comment_text}
+                        "snippet": {"textOriginal": text}
                     },
                 }
             },
         ).execute()
-        comment_id = resp["id"]
-        # Pin it
-        youtube.commentThreads().update(
+        cid = resp["id"]
+        svc.commentThreads().update(
             part="snippet",
             body={
-                "id": comment_id,
+                "id": cid,
                 "snippet": {
                     "videoId": video_id,
-                    "topLevelComment": {
-                        "snippet": {"textOriginal": comment_text}
-                    },
+                    "topLevelComment": {"snippet": {"textOriginal": text}},
                     "isPinned": True,
                 }
             },
         ).execute()
-        print(f"  comment pinned: {comment_text[:50]}...", flush=True)
+        print(f"  comment pinned: {text[:50]}...", flush=True)
     except Exception as e:
         err = str(e)
-        if "insufficient" in err.lower() or "scope" in err.lower() or "403" in err:
-            print(f"  comment pinning unavailable (re-authenticate with new scopes)")
-
+        if any(k in err.lower() for k in ("insufficient", "scope", "403", "invalid_scope")):
+            print(f"  comment pinning: token lacks force-ssl scope (re-auth needed)")
         else:
             print(f"  comment pinning failed: {err}", flush=True)
