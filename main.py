@@ -57,11 +57,29 @@ def main():
           flush=True)
 
     # ---- 2) content plan -------------------------------------------------
-    plan, llm_used = llm.generate_plan(topic)
+    pre_written = str(item.get("script_title") or "").strip()
+    if pre_written and str(item.get("script_desc") or "").strip():
+        plan = {
+            "title": pre_written,
+            "description": str(item.get("script_desc", "")).strip(),
+            "tags": [t.strip() for t in str(item.get("script_tags", "")).split(",") if t.strip()],
+            "hook": str(item.get("script_hook") or "Watch till the end").strip(),
+            "scenes": None,
+        }
+        llm_used = "sheet-pre-written"
+        print(f"  Using pre-written script from sheet", flush=True)
+    else:
+        plan, llm_used = llm.generate_plan(topic)
+
+    if plan.get("scenes") is None:
+        offline = llm._offline(plan["title"])
+        plan["scenes"] = offline["scenes"]
+
     report["providers"]["script"] = llm_used
     scenes = plan["scenes"]
     print(f"Title: {plan['title']}\nHook : {plan['hook']}\nScenes: {len(scenes)}",
           flush=True)
+    sheets.write_script_metadata(item, plan)
 
     # ---- 3+4) voiceover and visuals per scene, all in parallel ------------
     from concurrent.futures import ThreadPoolExecutor

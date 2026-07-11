@@ -72,19 +72,35 @@ def get_next_item():
         return {"row_idx": None, "source": "built-in", **pick}
 
 
+def _write_fields(item, updates):
+    """Write multiple fields to the sheet row."""
+    if item.get("source") != "google-sheet" or not item.get("row_idx"):
+        return
+    try:
+        ws = _worksheet()
+        header = [h.strip().lower() for h in ws.row_values(1)]
+        for name, value in updates.items():
+            if name in header:
+                ws.update_cell(item["row_idx"], header.index(name) + 1, value)
+    except Exception as e:
+        print(f"WARNING: could not write to sheet: {e}")
+
+
+def write_script_metadata(item, plan):
+    """Write back LLM-generated title, description, tags, hook to sheet."""
+    _write_fields(item, {
+        "script_title": (plan.get("title") or "")[:200],
+        "script_desc": (plan.get("description") or "")[:500],
+        "script_tags": ",".join(plan.get("tags") or [])[:500],
+        "script_hook": (plan.get("hook") or "")[:200],
+    })
+
+
 def mark_done(item, url):
     """Write status back — only possible when the topic came from the Sheet."""
     if item.get("source") != "google-sheet" or not item.get("row_idx"):
         print(f"(source={item.get('source')}: no write-back, nothing to update)")
         return
-    try:
-        ws = _worksheet()
-        header = [h.strip().lower() for h in ws.row_values(1)]
-        updates = {"status": "done", "youtube_url": url,
-                   "date_posted": datetime.date.today().isoformat()}
-        for name, value in updates.items():
-            if name in header:
-                ws.update_cell(item["row_idx"], header.index(name) + 1, value)
-        print("Sheet updated.")
-    except Exception as e:
-        print(f"WARNING: could not write back to sheet: {e}")
+    _write_fields(item, {"status": "done", "youtube_url": url,
+                         "date_posted": datetime.date.today().isoformat()})
+    print("Sheet updated.")
