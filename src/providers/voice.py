@@ -214,7 +214,7 @@ def synth(text, voice, out_path):
         except Exception as e:
             print(f"    elevenlabs failed for '{voice}': {e} — falling through chain")
 
-    chain = [("elevenlabs", _elevenlabs), ("edge-tts", _edge),
+    chain = [("edge-tts", _edge),
              ("piper-local", _piper),
              ("espeak-ng", _espeak), ("silent", _silent)]
     last_err = None

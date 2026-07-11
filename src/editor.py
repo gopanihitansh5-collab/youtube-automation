@@ -138,8 +138,11 @@ def _fmt_ts(t):
 
 def _write_srt(scene_words, durations, path):
     """Per-word SRT captions: each word pops up individually at its exact timing.
-    Minimum 0.3s per cue, grouped only for sub-150ms words.
+    Minimum 0.3s per cue.  Emoji and non-ASCII characters are stripped because
+    the Ubuntu runner font (DejaVu Sans) lacks those glyphs.
     """
+    import re
+    _clean = lambda t: re.sub(r'[^\x20-\x7E]', '', t).strip()
     MIN_DUR = 0.3
     cues, n, offset = [], 1, 0.0
 
@@ -147,6 +150,10 @@ def _write_srt(scene_words, durations, path):
         i = 0
         while i < len(words):
             w = words[i]
+            raw = _clean(w[0])
+            if not raw:
+                i += 1
+                continue
             start = offset + w[1]
             end = offset + w[2]
             if end - start < MIN_DUR:
@@ -155,7 +162,7 @@ def _write_srt(scene_words, durations, path):
                 end = offset + dur
             if end <= start:
                 end = start + MIN_DUR
-            cues.append((start, end, w[0]))
+            cues.append((start, end, raw))
             i += 1
         offset += dur
 
@@ -203,7 +210,8 @@ def build(scene_visuals, scene_audios, scene_words, durations, hook, out):
     vf = f"subtitles=output/subs.srt:force_style='{style}'"
 
     font = _font()
-    hook_txt = (hook or "").replace(":", " ").replace("'", "").replace("\\", "")
+    import re
+    hook_txt = re.sub(r'[^\x20-\x7E]', '', (hook or "").replace(":", " ").replace("'", "").replace("\\", ""))
     if font and hook_txt:
         zoom_fs = "'if(lt(t,2.5),30+16*t,70)'"
         vf += (f",drawtext=fontfile='{_font_arg(font)}':text='{hook_txt}':"

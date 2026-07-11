@@ -110,7 +110,7 @@ def make(hook_text, video_path, out_path):
 
     if not font:
         print("  thumbnail: no font found — extracting first video frame")
-        _run(["ffmpeg", "-y", "-i", video_path, "-vframes", "1", out_path])
+        _run(["ffmpeg", "-y", "-i", video_path, "-vframes", "1", "-update", "1", out_path])
         return out_path
 
     cat = _classify(hook)
@@ -208,10 +208,10 @@ def make(hook_text, video_path, out_path):
     try:
         _run(["ffmpeg", "-y", "-i", current,
               "-vf", vf,
-              "-frames:v", "1", out_path])
+              "-frames:v", "1", "-update", "1", out_path])
     except subprocess.CalledProcessError:
         print("  thumbnail: drawtext failed — using gradient without text")
-        _run(["ffmpeg", "-y", "-i", current, "-frames:v", "1", out_path])
+        _run(["ffmpeg", "-y", "-i", current, "-frames:v", "1", "-update", "1", out_path])
 
     # Cleanup temp files
     for f in temp_files:
