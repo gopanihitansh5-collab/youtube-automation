@@ -87,5 +87,7 @@ jobs:
             output/final.mp4
             output/metadata.json
             output/subs.srt
+            output/thumbnail.png
+            output/analytics.json
           if-no-files-found: warn
           retention-days: 7
