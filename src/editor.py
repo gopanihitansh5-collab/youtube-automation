@@ -5,22 +5,23 @@ Handles three kinds of scene visual:
   "image" -> Ken Burns zoom (in on even scenes, out on odd scenes)
   None    -> animated gradient background (flat color if the filter is missing)
 
-Then: concat -> burn word-timed captions -> hook overlay -> optional background
-music from assets/music/ -> final H.264/AAC mux.
+Then: concat -> burn word-timed captions -> hook overlay with zoom animation ->
+optional background music from assets/music/ -> final H.264/AAC mux.
 """
 import os
 import glob
 import json
+import datetime
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 
 W, H, FPS = 1080, 1920, 30
 
 FONT_CANDIDATES = [
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",   # ubuntu runner
-    "C:/Windows/Fonts/arialbd.ttf",                            # windows
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "C:/Windows/Fonts/arialbd.ttf",
     "C:/Windows/Fonts/arial.ttf",
-    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",       # macos
+    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
 ]
 
 
@@ -32,7 +33,6 @@ def _font():
 
 
 def _font_arg(path):
-    """Escape a font path for use inside a drawtext filter (Windows ':')."""
     return path.replace("\\", "/").replace(":", "\\:")
 
 
@@ -59,14 +59,12 @@ def _norm_video(src, dur, out):
 
 
 def _norm_image(src, dur, out, index):
-    """Ken Burns: slow zoom on a still image. Direction alternates per scene."""
     frames = max(int(dur * FPS), 2)
     if index % 2 == 0:
-        zexpr = f"1+0.12*on/{frames}"                 # zoom in  1.00 -> 1.12
+        zexpr = f"1+0.12*on/{frames}"
     else:
-        zexpr = f"1.12-0.12*on/{frames}"              # zoom out 1.12 -> 1.00
+        zexpr = f"1.12-0.12*on/{frames}"
     vf = (
-        # oversize first so the zoom window never leaves the frame
         f"scale={W * 2}:{H * 2}:force_original_aspect_ratio=increase,"
         f"crop={W * 2}:{H * 2},"
         f"zoompan=z='{zexpr}':d={frames}:"
@@ -79,7 +77,6 @@ def _norm_image(src, dur, out, index):
 
 
 def _norm_gradient(dur, out, index):
-    """Animated gradient background; falls back to a flat color."""
     palettes = ["0x0f172a:0x7c3aed", "0x111827:0x0ea5e9",
                 "0x1e1b4b:0xdb2777", "0x052e16:0x22d3ee"]
     c0, c1 = palettes[index % len(palettes)].split(":")
@@ -114,21 +111,12 @@ def _listfile(paths, out):
 
 
 def _concat(paths, out):
-    # all normalized clips share identical codec params -> stream copy
-    # (no re-encode) is safe and saves a full encoding pass
     _run(["ffmpeg", "-y", "-f", "concat", "-safe", "0",
           "-i", _listfile(paths, out), "-c", "copy", out])
     return out
 
 
 def _concat_audio(paths, durations, out):
-    """Sample-exact voiceover track.
-
-    MP3 files carry encoder priming/padding, so concatenating them directly
-    drifts out of sync and clicks at scene joins. Instead every scene is
-    decoded to WAV and padded/trimmed to EXACTLY its scene duration, so the
-    audio timeline matches the video timeline to the sample.
-    """
     wavs = []
     for i, (p, dur) in enumerate(zip(paths, durations)):
         w = f"output/seg_{i}.wav"
@@ -148,24 +136,31 @@ def _fmt_ts(t):
     return f"{int(h):02}:{int(m):02}:{int(s):02},{ms:03}"
 
 
-def _write_srt(scene_words, durations, path, group=3):
+def _write_srt(scene_words, durations, path):
+    """Per-word SRT captions: each word pops up individually at its exact timing.
+    Minimum 0.3s per cue, grouped only for sub-150ms words.
+    """
+    MIN_DUR = 0.3
     cues, n, offset = [], 1, 0.0
+
     for words, dur in zip(scene_words, durations):
-        bucket = []
-        for w in words:
-            bucket.append(w)
-            if len(bucket) >= group:
-                cues.append((offset + bucket[0][1], offset + bucket[-1][2],
-                             " ".join(x[0] for x in bucket)))
-                bucket = []
-        if bucket:
-            cues.append((offset + bucket[0][1], offset + bucket[-1][2],
-                         " ".join(x[0] for x in bucket)))
+        i = 0
+        while i < len(words):
+            w = words[i]
+            start = offset + w[1]
+            end = offset + w[2]
+            if end - start < MIN_DUR:
+                end = start + MIN_DUR
+            if end > offset + dur:
+                end = offset + dur
+            if end <= start:
+                end = start + MIN_DUR
+            cues.append((start, end, w[0]))
+            i += 1
         offset += dur
+
     with open(path, "w", encoding="utf-8") as f:
         for st, en, txt in cues:
-            if en <= st:
-                en = st + 0.4
             f.write(f"{n}\n{_fmt_ts(st)} --> {_fmt_ts(en)}\n{txt}\n\n")
             n += 1
     return path
@@ -173,22 +168,24 @@ def _write_srt(scene_words, durations, path, group=3):
 
 # ------------------------------------------------------------------- music
 def _pick_music():
-    """First file in assets/music/ (mp3/m4a/wav/ogg), else None."""
+    """Cycle through assets/music/ files by day-of-year so each video gets a
+    different track."""
+    tracks = []
     for ext in ("mp3", "m4a", "wav", "ogg"):
-        hits = sorted(glob.glob(f"assets/music/*.{ext}"))
-        if hits:
-            return hits[0]
-    return None
+        tracks.extend(sorted(glob.glob(f"assets/music/*.{ext}")))
+    if not tracks:
+        return None
+    idx = datetime.date.today().toordinal() % len(tracks)
+    picked = tracks[idx]
+    print(f"  background music: {os.path.basename(picked)}")
+    return picked
 
 
 # ------------------------------------------------------------------- build
 def build(scene_visuals, scene_audios, scene_words, durations, hook, out):
     """scene_visuals: list of (path_or_None, kind). Returns path of final mp4."""
-    # quantize every scene to a whole number of frames so the video timeline,
-    # audio timeline and caption offsets all agree exactly
     durations = [max(round(d * FPS), 2) / FPS for d in durations]
 
-    # normalize all scenes in parallel — they're independent ffmpeg jobs
     with ThreadPoolExecutor(max_workers=min(4, len(durations))) as pool:
         norm = list(pool.map(
             lambda iv: _normalize(iv[1], durations[iv[0]],
@@ -199,19 +196,22 @@ def build(scene_visuals, scene_audios, scene_words, durations, hook, out):
     voice = _concat_audio(scene_audios, durations, "output/voice.wav")
 
     _write_srt(scene_words, durations, "output/subs.srt")
-    style = ("FontName=DejaVu Sans,Fontsize=17,Bold=1,"
+
+    style = ("Fontname=DejaVu Sans,Fontsize=26,Bold=1,"
              "PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,"
-             "BorderStyle=1,Outline=3,Shadow=0,Alignment=2,MarginV=260")
+             "BorderStyle=1,Outline=3,Shadow=1,Alignment=2,MarginV=350")
     vf = f"subtitles=output/subs.srt:force_style='{style}'"
 
     font = _font()
     hook_txt = (hook or "").replace(":", " ").replace("'", "").replace("\\", "")
     if font and hook_txt:
+        zoom_fs = "'if(lt(t,2.5),30+16*t,70)'"
         vf += (f",drawtext=fontfile='{_font_arg(font)}':text='{hook_txt}':"
-               f"fontcolor=yellow:fontsize=70:borderw=5:bordercolor=black:"
+               f"fontcolor=yellow:fontsize={zoom_fs}:"
+               f"alpha='if(lt(t,0.4),t/0.4,1)':"
+               f"borderw=5:bordercolor=black:"
                f"line_spacing=8:x=(w-text_w)/2:y=300:enable='lt(t,3)'")
 
-    # loudness-normalize the voice to -16 LUFS (standard for shorts/reels)
     LOUD = "loudnorm=I=-16:TP=-1.5:LRA=11"
     music = _pick_music()
     cmd = ["ffmpeg", "-y", "-i", base_video, "-i", voice]

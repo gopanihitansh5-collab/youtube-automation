@@ -104,3 +104,29 @@ def mark_done(item, url):
     _write_fields(item, {"status": "done", "youtube_url": url,
                          "date_posted": datetime.date.today().isoformat()})
     print("Sheet updated.")
+
+
+def get_recent_urls(limit=5):
+    """Return the most recent youtube_url values from done rows."""
+    try:
+        ws = _worksheet()
+        vals = ws.get_all_values()
+        header = [h.strip().lower() for h in vals[0]]
+        try:
+            url_idx = header.index("youtube_url")
+            status_idx = header.index("status")
+        except ValueError:
+            return []
+        urls = []
+        for row in reversed(vals[1:]):
+            if len(row) > max(url_idx, status_idx):
+                if str(row[status_idx]).strip().lower() == "done":
+                    url = str(row[url_idx]).strip()
+                    if url:
+                        urls.append(url)
+                        if len(urls) >= limit:
+                            break
+        return urls
+    except Exception as e:
+        print(f"WARNING: could not read recent URLs: {e}")
+        return []

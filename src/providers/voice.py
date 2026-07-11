@@ -104,6 +104,89 @@ def _espeak(text, voice, out_path):
 
 
 # ------------------------------------------------------------------ silent
+# -------------------------------------------------------------- elevenlabs
+# Common ElevenLabs voice name → ID mapping. Add more as needed.
+_ELEVEN_VOICES = {
+    "Rachel": "21m00Tcm4TlvDq8ikWAM",
+    "Adam": "pNInz6obpgDQGcFmaJgB",
+    "Josh": "TxGEqnHWrfWFTfGW9XjX",
+    "Nicole": "pi3gcvgx4nDm2a6D3SKc",
+    "Sam": "yoZ06aMxZJJ28mnd3zQ5",
+    "Bella": "EXAVITQu4vrj8gSDl1bT",
+    "Arnold": "VR6Ae3Lc6AqGiyTPs28c",
+    "Charlie": "IKne3meq5aR9XaB1NJb3",
+    "Dorothy": "ThT5K0dITNfqL1sCcy6p",
+    "Eli": "MF1JmHy5SWM7X9hA5Uxv",
+    "Emily": "LcfcdonarrXDG2hK4JfQ",
+    "Ethan": "g5CIjZEefAph1n3v3Vl3",
+    "Freya": "VRkARj3BzBcGgX6rZDZL",
+    "Gigi": "jBDFV3SlX6J8o0mOiADK",
+    "Michael": "flWY5Qz7h5K5z8v3y2v3",
+}
+
+
+def _eleven_voice_id(name):
+    """Resolve a voice name to an ElevenLabs voice ID.
+    Supports 'eleven:Name' prefix, bare voice names, and raw IDs."""
+    if not name:
+        return None
+    raw = name.strip()
+    if raw.startswith("eleven:"):
+        raw = raw[7:].strip()
+    # If it's already a UUID-like ID, return as-is
+    if len(raw) == 20 and raw.isascii() and "-" not in raw:
+        return raw
+    # Try the name lookup
+    return _ELEVEN_VOICES.get(raw)
+
+
+def _elevenlabs(text, voice, out_path):
+    """ElevenLabs TTS with word-level timestamps from the /with-timestamps endpoint."""
+    import requests as _req
+    import base64 as _b64
+
+    api_key = os.environ.get("ELEVENLABS_API_KEY")
+    if not api_key:
+        raise RuntimeError("ELEVENLABS_API_KEY not set")
+    voice_id = _eleven_voice_id(voice) or "21m00Tcm4TlvDq8ikWAM"
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/with-timestamps"
+    headers = {"xi-api-key": api_key, "Content-Type": "application/json"}
+    payload = {
+        "text": text,
+        "model_id": "eleven_multilingual_v2",
+        "voice_settings": {"stability": 0.3, "similarity_boost": 0.7},
+    }
+    resp = _req.post(url, json=payload, headers=headers, timeout=60)
+    resp.raise_for_status()
+    data = resp.json()
+
+    audio_bytes = _b64.b64decode(data["audio_base64"])
+    with open(out_path, "wb") as f:
+        f.write(audio_bytes)
+
+    alignment = data.get("alignment", {})
+    chars = alignment.get("characters", [])
+    char_starts = alignment.get("char_start_times_seconds", [])
+    char_ends = alignment.get("char_end_times_seconds", [])
+    if not chars:
+        return out_path, _estimate_timings(text, _probe(out_path))
+
+    words, current_word = [], ""
+    for ci, (ch, cs, ce) in enumerate(zip(chars, char_starts, char_ends)):
+        current_word += ch
+        if ch.isspace() and current_word.strip():
+            w = current_word.strip()
+            if w:
+                words.append((w, cs, ce))
+            current_word = ""
+    if current_word.strip():
+        words.append((current_word.strip(),
+                      char_starts[-1] if char_starts else 0,
+                      char_ends[-1] if char_ends else _probe(out_path)))
+
+    return out_path, words if words else _estimate_timings(text, _probe(out_path))
+
+
 def _silent(text, voice, out_path):
     """No audio at all: captions carry the video. ~0.38s per word of silence."""
     dur = max(2.5, 0.38 * len(_words_of(text)))
@@ -115,8 +198,24 @@ def _silent(text, voice, out_path):
 
 
 def synth(text, voice, out_path):
-    """Return (audio_path, [(word, start, end)...], provider_name). Never raises."""
-    chain = [("edge-tts", _edge), ("piper-local", _piper),
+    """Return (audio_path, [(word, start, end)...], provider_name). Never raises.
+
+    If the `voice` parameter matches an ElevenLabs voice name (e.g. 'Rachel',
+    'Adam', 'eleven:Rachel'), and ELEVENLABS_API_KEY is set, ElevenLabs is used
+    directly as the only provider — giving premium quality for important topics.
+    """
+    # Check for explicit ElevenLabs voice
+    eleven_id = _eleven_voice_id(voice) if voice else None
+    if eleven_id and os.environ.get("ELEVENLABS_API_KEY"):
+        try:
+            path, words = _elevenlabs(text, voice, out_path)
+            print(f"    voice provider: elevenlabs ({voice})")
+            return path, words, f"elevenlabs-{voice}"
+        except Exception as e:
+            print(f"    elevenlabs failed for '{voice}': {e} — falling through chain")
+
+    chain = [("elevenlabs", _elevenlabs), ("edge-tts", _edge),
+             ("piper-local", _piper),
              ("espeak-ng", _espeak), ("silent", _silent)]
     last_err = None
     for name, fn in chain:
