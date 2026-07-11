@@ -18,30 +18,39 @@ FONT_CANDIDATES = [
     "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
 ]
 
-# Category → color palette mapping for thumbnail backgrounds
+# Category → colour palette VARIANT list (one is picked at random each run)
 _CATEGORY_PALETTES = {
-    "psychology":  ("0x1a0a2e", "0x7c3aed"),   # deep purple → violet
-    "habits":      ("0x0f172a", "0x0ea5e9"),   # dark blue → sky blue
-    "stoicism":    ("0x1a0a0a", "0x991b1b"),   # dark maroon → red
-    "money":       ("0x1a1200", "0xd97706"),   # dark amber → gold
-    "health":      ("0x052e16", "0x22d3ee"),   # dark teal → cyan
-    "creativity":  ("0x1e1b4b", "0xdb2777"),   # indigo → pink
-    "communication":("0x0c0a1e", "0x6366f1"),  # navy → indigo
-    "productivity":("0x1c1917", "0xea580c"),   # dark brown → orange
-    "general":     ("0x0f172a", "0x7c3aed"),   # default purple
+    "psychology":  [("0x1a0a2e", "0x7c3aed"), ("0x0d0221", "0x9333ea"),
+                    ("0x14001a", "0xa855f7"), ("0x200524", "0x6b21a8")],
+    "habits":      [("0x0f172a", "0x0ea5e9"), ("0x082f49", "0x38bdf8"),
+                    ("0x0c1920", "0x0284c7"), ("0x042f3a", "0x7dd3fc")],
+    "stoicism":    [("0x1a0a0a", "0x991b1b"), ("0x2d0a0a", "0xdc2626"),
+                    ("0x1f0505", "0xb91c1c"), ("0x1c1010", "0x7f1d1d")],
+    "money":       [("0x1a1200", "0xd97706"), ("0x1c1600", "0xeab308"),
+                    ("0x2a1f00", "0xf59e0b"), ("0x1a1500", "0xfbbf24")],
+    "health":      [("0x052e16", "0x22d3ee"), ("0x022c22", "0x2dd4bf"),
+                    ("0x0a2e1a", "0x14b8a6"), ("0x001a10", "0x5eead4")],
+    "creativity":  [("0x1e1b4b", "0xdb2777"), ("0x2d0a3a", "0xec4899"),
+                    ("0x1c0033", "0xd946ef"), ("0x2e1050", "0xe879f9")],
+    "communication":[("0x0c0a1e", "0x6366f1"), ("0x13104a", "0x818cf8"),
+                     ("0x1e1b4b", "0x4f46e5"), ("0x0f0d30", "0xa5b4fc")],
+    "productivity":[("0x1c1917", "0xea580c"), ("0x1a0e00", "0xf97316"),
+                     ("0x2a1a0a", "0xd97706"), ("0x1c1200", "0xfdba74")],
+    "general":     [("0x0f172a", "0x7c3aed"), ("0x0a0a1a", "0x6366f1"),
+                    ("0x1a0a2e", "0x6d28d9"), ("0x1e1b3a", "0x8b5cf6")],
 }
 
-# Emoji/icon for each category (shown above the main text)
+# Emoji/icon variants per category (one picked at random)
 _CATEGORY_ICONS = {
-    "psychology":  "\U0001f9e0",
-    "habits":      "\U0001f4aa",
-    "stoicism":    "\U0001f3db\ufe0f",
-    "money":       "\U0001f4b0",
-    "health":      "\U0001f9a0",
-    "creativity":  "\U0001f3a8",
-    "communication": "\U0001f5e3\ufe0f",
-    "productivity": "\u23f1\ufe0f",
-    "general":     "\U0001f525",
+    "psychology":  ["\U0001f9e0", "\U0001fa95", "\U0001f4a1", "\U0001f31f"],
+    "habits":      ["\U0001f4aa", "\U0001f3cb\ufe0f", "\u2696\ufe0f", "\U0001f3af"],
+    "stoicism":    ["\U0001f3db\ufe0f", "\U0001f4dc", "\U0001f52e", "\U0001f4ac"],
+    "money":       ["\U0001f4b0", "\U0001f911", "\U0001f4b8", "\U0001f3e6"],
+    "health":      ["\U0001f9a0", "\U0001f3c3", "\U0001f34b", "\u2600\ufe0f"],
+    "creativity":  ["\U0001f3a8", "\U0001f4a1", "\u2728", "\U0001f308"],
+    "communication":["\U0001f5e3\ufe0f", "\U0001f4ac", "\U0001f91d", "\U0001f92b"],
+    "productivity":["\u23f1\ufe0f", "\U0001f4cb", "\u231b", "\U0001f3c6"],
+    "general":     ["\U0001f525", "\U0001f680", "\U0001f3f3\ufe0f", "\U0001f30d"],
 }
 
 
@@ -93,7 +102,9 @@ def _smart_split(text, max_chars=25):
 
 def make(hook_text, video_path, out_path):
     """Generate a 1080x1920 Shorts thumbnail with hook text and category-aware
-    color scheme. Falls back to first video frame on any error."""
+    color scheme. Every call picks random variants so no two thumbnails look alike.
+    Falls back to first video frame on any error."""
+    import random
     font = _font()
     hook = (hook_text or "Watch this").replace(":", " ").replace("'", "").replace("\\", "")
 
@@ -103,8 +114,10 @@ def make(hook_text, video_path, out_path):
         return out_path
 
     cat = _classify(hook)
-    c0, c1 = _CATEGORY_PALETTES.get(cat, _CATEGORY_PALETTES["general"])
-    icon = _CATEGORY_ICONS.get(cat, "")
+    palettes = _CATEGORY_PALETTES.get(cat, _CATEGORY_PALETTES["general"])
+    c0, c1 = random.choice(palettes)
+    icons = _CATEGORY_ICONS.get(cat, _CATEGORY_ICONS["general"])
+    icon = random.choice(icons)
 
     line1, line2 = _smart_split(hook)
 

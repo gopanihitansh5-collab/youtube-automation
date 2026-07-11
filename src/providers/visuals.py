@@ -1,4 +1,4 @@
-"""Per-scene visuals with a graceful provider chain.
+"""Per-scene visuals with unique-image guarantee across runs.
 
 Order:
   1. Pexels stock video    (PEXELS_API_KEY, free)
@@ -7,13 +7,54 @@ Order:
                             the editor animates it with a Ken Burns zoom)
   4. None                  (editor paints an animated gradient — never dies)
 
-Returns (path_or_None, kind, provider) where kind is "video" | "image" | None.
+Every provider randomises its results so consecutive runs never reuse the same
+footage.  The used-visuals log in output/used_visuals.json persists across runs
+via the GitHub Actions artifact — see main.py restore/upload logic.
 """
 import os
+import json
+import hashlib
+from datetime import date
 
 import requests
 
 
+# ------------------------------------------------------------------- helpers
+def _used_path():
+    return "output/used_visuals.json"
+
+
+def _load_used():
+    try:
+        with open(_used_path()) as f:
+            return set(json.load(f))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return set()
+
+
+def _record_used(url):
+    used = _load_used()
+    used.add(url)
+    os.makedirs("output", exist_ok=True)
+    with open(_used_path(), "w") as f:
+        json.dump(sorted(used), f)
+
+
+# ------------------------------------------------------------------- seeding
+def _search_seed(keyword):
+    """Append a daily-varying suffix so the same keyword returns different
+    fresh results every day."""
+    seeds = [
+        "cinematic lighting", "professional", "modern", "clean", "dramatic",
+        "minimalist", "dark moody", "bright vibrant", "high contrast",
+        "aesthetic", "soft focus", "golden hour", "urban", "natural",
+        "studio quality", "deep colors", "editorial style",
+    ]
+    idx = (date.today().toordinal() + len(keyword)) % len(seeds)
+    return f"{keyword} {seeds[idx]}"
+
+
+# ------------------------------------------------------------------- download
 def _download(url, out_path, timeout=180):
     with requests.get(url, timeout=timeout, stream=True) as r:
         r.raise_for_status()
@@ -25,50 +66,72 @@ def _download(url, out_path, timeout=180):
     return out_path
 
 
+# ---------------------------------------------------------------- pexels
 def _pexels(keyword, out_path):
     key = os.environ["PEXELS_API_KEY"]
+    used = _load_used()
+    seeded = _search_seed(keyword)
     r = requests.get(
         "https://api.pexels.com/videos/search",
         headers={"Authorization": key},
-        params={"query": keyword, "per_page": 5, "orientation": "portrait"},
+        params={"query": seeded, "per_page": 40, "orientation": "portrait"},
         timeout=30,
     )
     r.raise_for_status()
+    candidates = []
     for v in r.json().get("videos", []):
         files = [f for f in v.get("video_files", []) if f.get("link")]
-        if not files:
-            continue
-        # smallest file that still covers 1080x1920 — 4K originals waste
-        # minutes of download + scaling time for zero visible gain
-        good = sorted((f for f in files if (f.get("height") or 0) >= 1920),
-                      key=lambda f: f.get("height") or 0)
-        pick = good[0] if good else max(files, key=lambda f: f.get("height") or 0)
-        return _download(pick["link"], out_path)
-    raise RuntimeError(f"no Pexels results for {keyword!r}")
+        for f in files:
+            if (f.get("height") or 0) >= 1080 and f["link"] not in used:
+                candidates.append(f)
+    if not candidates:
+        raise RuntimeError(f"no fresh Pexels result for {seeded!r}")
+    import random
+    pick = random.choice(candidates)
+    _record_used(pick["link"])
+    return _download(pick["link"], out_path)
 
 
+# ---------------------------------------------------------------- pixabay
 def _pixabay(keyword, out_path):
     key = os.environ["PIXABAY_API_KEY"]
+    used = _load_used()
+    seeded = _search_seed(keyword)
     r = requests.get(
         "https://pixabay.com/api/videos/",
-        params={"key": key, "q": keyword, "per_page": 5, "safesearch": "true"},
+        params={"key": key, "q": seeded, "per_page": 40, "safesearch": "true"},
         timeout=30,
     )
     r.raise_for_status()
+    candidates = []
     for hit in r.json().get("hits", []):
         vids = hit.get("videos", {})
         for size in ("large", "medium", "small"):
             url = (vids.get(size) or {}).get("url")
-            if url:
-                return _download(url, out_path)
-    raise RuntimeError(f"no Pixabay results for {keyword!r}")
+            if url and url not in used:
+                candidates.append(url)
+    if not candidates:
+        raise RuntimeError(f"no fresh Pixabay result for {seeded!r}")
+    import random
+    pick = random.choice(candidates)
+    _record_used(pick)
+    return _download(pick, out_path)
 
 
+# --------------------------------------------------------------- hf image
 def _hf_image(keyword, out_path):
-    """Generate a vertical AI image with FLUX.1-schnell on the free HF API."""
+    """Generate a vertical AI image with FLUX.1-schnell — unique every time."""
     token = os.environ["HF_TOKEN"]
-    prompt = (f"{keyword}, cinematic vertical composition, dramatic lighting, "
-              f"highly detailed, professional photography, 9:16")
+    # Vary the prompt with a random style modifier
+    import random
+    styles = [
+        "cinematic, dramatic lighting, highly detailed, professional photography",
+        "warm tones, soft lighting, dreamy atmosphere, editorial quality",
+        "high contrast, sharp focus, moody atmosphere, film grain",
+        "vibrant colors, natural lighting, crisp details, lifestyle photography",
+    ]
+    style = styles[random.randrange(len(styles))]
+    prompt = f"{keyword}, vertical composition, {style}, 9:16 aspect ratio"
     r = requests.post(
         "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell",
         headers={"Authorization": f"Bearer {token}", "x-wait-for-model": "true"},
@@ -83,6 +146,7 @@ def _hf_image(keyword, out_path):
     return out_path
 
 
+# ----------------------------------------------------------------- public
 def get_visual(keyword, out_base):
     """Return (path_or_None, kind, provider_name). Never raises."""
     chain = []
