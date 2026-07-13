@@ -99,18 +99,22 @@ def _pin_comment(video_id, text=None):
             },
         ).execute()
         cid = resp["id"]
-        svc.commentThreads().update(
-            part="snippet",
-            body={
-                "id": cid,
-                "snippet": {
-                    "videoId": video_id,
-                    "topLevelComment": {"snippet": {"textOriginal": text}},
-                    "isPinned": True,
-                }
-            },
-        ).execute()
-        print(f"  comment pinned: {text[:50]}...", flush=True)
+        print(f"  comment posted: {text[:50]}...", flush=True)
+        try:
+            svc.commentThreads().update(
+                part="snippet",
+                body={
+                    "id": cid,
+                    "snippet": {
+                        "videoId": video_id,
+                        "topLevelComment": {"snippet": {"textOriginal": text}},
+                        "isPinned": True,
+                    }
+                },
+            ).execute()
+            print(f"  comment pinned", flush=True)
+        except AttributeError:
+            print(f"  comment pinning not supported by this API version — comment posted unpinned", flush=True)
     except Exception as e:
         err = str(e)
         if any(k in err.lower() for k in ("insufficient", "scope", "403", "invalid_scope")):
