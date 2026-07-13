@@ -51,6 +51,7 @@ from script_cache import (cache_script, load_cached_script, clear_cache,
                           save_run_state, get_run_state, is_step_completed,
                           clear_run_state, estimate_tokens, suggest_model)
 from caption_emphasis import tag_all_scenes
+from multi_llm_pipeline import run_full_pipeline
 
 # Module-level cache for trending context (populated by _get_topic, consumed by _generate_long_plan)
 _TRENDING_CTX = {"region_data": [], "best_video_topic": None, "global_pulse": ""}
@@ -796,7 +797,7 @@ def main():
     print("=== Long-Form Video Pipeline (8-15 min, landscape 1920x1080) ===",
           flush=True)
     os.makedirs("output_long", exist_ok=True)
-    report = {"providers": {}, "chapters": []}
+    report = {"providers": {}, "chapters": [], "scenes": []}
 
     item = _get_topic()
     if item is None:
