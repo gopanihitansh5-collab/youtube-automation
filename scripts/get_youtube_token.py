@@ -16,7 +16,10 @@ account as a Test User, otherwise the refresh token expires in 7 days.
 """
 from google_auth_oauthlib.flow import InstalledAppFlow
 
-SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
+SCOPES = [
+    "https://www.googleapis.com/auth/youtube.upload",
+    "https://www.googleapis.com/auth/youtube.force-ssl",
+]
 
 flow = InstalledAppFlow.from_client_secrets_file("client_secret.json", SCOPES)
 # access_type=offline + prompt=consent guarantees a refresh_token is returned

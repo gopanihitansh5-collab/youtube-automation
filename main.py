@@ -243,7 +243,8 @@ def main():
         try:
             from src import youtube_upload
             url = youtube_upload.upload(final, plan["title"],
-                                        plan["description"], plan["tags"], privacy)
+                                        plan["description"], plan["tags"], privacy,
+                                        hook=plan.get("hook"))
             report["youtube_url"] = url
             with open("output/metadata.json", "w", encoding="utf-8") as f:
                 json.dump(report, f, indent=2, ensure_ascii=False)

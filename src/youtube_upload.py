@@ -38,15 +38,19 @@ def _service(extra_scopes=None):
     return build("youtube", "v3", credentials=creds)
 
 
-def upload(path, title, description, tags, privacy="public"):
+def upload(path, title, description, tags, privacy="public", hook=None):
     youtube = _service()
     if not youtube:
         raise RuntimeError("YouTube secrets not configured")
 
+    desc = (description or "").strip()
+    if not desc:
+        desc = f"{title}\n\n#shorts #{' #'.join((tags or [])[:5])}"
+
     body = {
         "snippet": {
             "title": (title or "Untitled")[:100],
-            "description": description or "",
+            "description": desc,
             "tags": tags or [],
             "categoryId": "22",
         },
@@ -68,7 +72,8 @@ def upload(path, title, description, tags, privacy="public"):
 
     video_id = response["id"]
 
-    _pin_comment(video_id)
+    comment = hook or f"What did you think? Drop your thoughts below!"
+    _pin_comment(video_id, text=comment)
 
     return f"https://youtu.be/{video_id}"
 
@@ -77,8 +82,7 @@ def _pin_comment(video_id, text=None):
     """Pin a comment on the uploaded video (separate service with force-ssl).
     Gracefully skips if the token only has youtube.upload scope."""
     if not text:
-        text = "What did you think? Drop your thoughts below! " \
-               "Don't forget to subscribe for more daily insights "
+        text = "What did you think? Drop your thoughts below!"
     try:
         svc = _service(extra_scopes=[
             "https://www.googleapis.com/auth/youtube.force-ssl"])
