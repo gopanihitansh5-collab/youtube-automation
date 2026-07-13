@@ -46,11 +46,9 @@ OPENROUTER_MODELS = [
 
 GROQ_MODELS = [
     "llama-3.3-70b-versatile",
-    "openai/gpt-oss-120b",
-    "meta-llama/llama-4-scout-17b-16e-instruct",
-    "qwen/qwen3-32b",
+    "llama-4-scout-17b-16e-instruct",
     "llama-3.1-8b-instant",
-    "openai/gpt-oss-20b",
+    "qwen-2.5-32b",
 ]
 
 GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash"]
@@ -89,7 +87,8 @@ def _extract_json(text):
     if start == -1 or end <= start:
         raise ValueError("no JSON object in model reply")
     raw = text[start:end + 1]
-    raw = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', raw)
+    raw = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', raw)
+    raw = re.sub(r'[\u0080-\u009f]', '', raw)
     return json.loads(raw)
 
 
