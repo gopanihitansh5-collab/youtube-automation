@@ -1,12 +1,17 @@
 """Script/plan generation with a graceful provider chain.
 
+Every script is structurally unique -- an intelligent diversity layer
+randomises format, voice, tone, hook style, CTA, and scene count before
+any provider generates content.
+
 Order:
-  1. Gemini Flash (REST)   (GEMINI_API_KEY, free tier)
-  2. OpenRouter            (OPENROUTER_API_KEY — ":free" models ONLY, $0 cost)
-  3. Hugging Face router   (HF_TOKEN, free tier, OpenAI-compatible chat API)
-  4. Local llama.cpp model (LOCAL_LLM=1 — Qwen2.5-3B GGUF downloaded onto the
+  1. Groq               (GROQ_API_KEY -- Llama 3.3 70B at 500+ tok/s, free tier)
+  2. Gemini Flash (REST)   (GEMINI_API_KEY, free tier)
+  3. OpenRouter            (OPENROUTER_API_KEY -- ":free" models ONLY, $0 cost)
+  4. Hugging Face router   (HF_TOKEN, free tier, OpenAI-compatible chat API)
+  5. Local llama.cpp model (LOCAL_LLM=1 -- Qwen2.5-3B GGUF downloaded onto the
                             runner itself; no API needed, CPU-only)
-  5. Offline template      (no network / no keys — always succeeds)
+  6. Offline script builder (no network / no keys -- always succeeds)
 
 Every provider returns the same validated plan dict:
   {title, description, tags[], hook, scenes[{narration, keyword}]}
@@ -17,27 +22,11 @@ import json
 
 import requests
 
-PROMPT = """You are a top faceless YouTube Shorts scriptwriter.
-Topic: "{topic}"
+from .prompt_builder import build_prompt, build_offline_script
 
-Return ONLY a JSON object with EXACTLY these keys:
-{{
-  "title": "clickable YouTube title, <= 70 characters, no quotes",
-  "description": "2-3 punchy lines about the video, then 5 relevant #hashtags on a new line",
-  "tags": ["12", "lowercase", "keyword", "strings", "relevant", "to", "the", "topic", "and", "niche", "for", "seo"],
-  "hook": "a punchy 4-7 word on-screen hook shown in the first 3 seconds",
-  "scenes": [
-    {{"narration": "one energetic spoken sentence", "keyword": "2-4 word stock-video search terms"}}
-  ]
-}}
 
-Rules:
-- 5 to 7 scenes.
-- Total narration ~130-160 words (about 40-55 seconds spoken).
-- First scene's narration must open with a strong hook that stops the scroll.
-- "keyword" must be concrete, visual, and searchable on a stock-video site.
-- No emojis inside "narration". Plain text only. Valid JSON only.
-"""
+def _offline(topic):
+    return build_offline_script(topic)
 
 # Free-tier friendly instruct models on the HF router, best first.
 HF_MODELS = [
@@ -46,8 +35,7 @@ HF_MODELS = [
     "mistralai/Mistral-7B-Instruct-v0.3",
 ]
 
-# OpenRouter: ONLY ":free" models — these cost $0. IDs rotate over time, so we
-# ask OpenRouter's live catalog first and fall back to this static list.
+# OpenRouter: ONLY ":free" models -- these cost $0.
 OPENROUTER_MODELS = [
     "deepseek/deepseek-chat-v3-0324:free",
     "meta-llama/llama-3.3-70b-instruct:free",
@@ -56,9 +44,27 @@ OPENROUTER_MODELS = [
     "mistralai/mistral-7b-instruct:free",
 ]
 
+GROQ_MODELS = [
+    "llama-3.3-70b-versatile",
+    "openai/gpt-oss-120b",
+    "meta-llama/llama-4-scout-17b-16e-instruct",
+    "qwen/qwen3-32b",
+    "llama-3.1-8b-instant",
+    "openai/gpt-oss-20b",
+]
+
+GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash"]
+
+# Temperature range -- randomised per video so outputs vary even from the
+# same provider and topic.
+_TEMP_RANGE = (0.65, 0.95)
+
+
+def _rand_temp(rng):
+    return round(rng.uniform(*_TEMP_RANGE), 2)
+
 
 def _openrouter_free_models():
-    """Live list of currently-available $0 models, biggest first."""
     try:
         r = requests.get("https://openrouter.ai/api/v1/models", timeout=30)
         r.raise_for_status()
@@ -75,17 +81,16 @@ def _openrouter_free_models():
         print(f"    OpenRouter catalog fetch failed ({e}) -> static list")
         return OPENROUTER_MODELS
 
-GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash"]
-
 
 def _extract_json(text):
-    """Pull the first JSON object out of a model reply (handles ```json fences)."""
     text = re.sub(r"^```(?:json)?|```$", "", text.strip(), flags=re.MULTILINE).strip()
     start = text.find("{")
     end = text.rfind("}")
     if start == -1 or end <= start:
         raise ValueError("no JSON object in model reply")
-    return json.loads(text[start:end + 1])
+    raw = text[start:end + 1]
+    raw = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', raw)
+    return json.loads(raw)
 
 
 def _validate(data, topic):
@@ -103,8 +108,32 @@ def _validate(data, topic):
     }
 
 
-def _gemini(topic):
-    """Plain REST call — works with any key format, no SDK needed."""
+def _groq(topic, prompt, temperature):
+    key = os.environ["GROQ_API_KEY"]
+    last_err = None
+    for model in GROQ_MODELS:
+        try:
+            r = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {key}"},
+                json={
+                    "model": model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 1400,
+                    "temperature": temperature,
+                },
+                timeout=120,
+            )
+            r.raise_for_status()
+            content = r.json()["choices"][0]["message"]["content"]
+            return _validate(_extract_json(content), topic)
+        except Exception as e:
+            last_err = e
+            print(f"    Groq model {model} failed: {e}")
+    raise RuntimeError(f"all Groq models failed: {last_err}")
+
+
+def _gemini(topic, prompt, temperature):
     key = os.environ["GEMINI_API_KEY"]
     last_err = None
     for model in GEMINI_MODELS:
@@ -114,9 +143,9 @@ def _gemini(topic):
                 f"{model}:generateContent",
                 headers={"x-goog-api-key": key},
                 json={
-                    "contents": [{"parts": [{"text": PROMPT.format(topic=topic)}]}],
+                    "contents": [{"parts": [{"text": prompt}]}],
                     "generationConfig": {"responseMimeType": "application/json",
-                                         "temperature": 0.8},
+                                         "temperature": temperature},
                 },
                 timeout=120,
             )
@@ -129,23 +158,21 @@ def _gemini(topic):
     raise RuntimeError(f"all Gemini models failed: {last_err}")
 
 
-def _openrouter(topic):
-    """OpenRouter — restricted to ':free' models so it can never cost money."""
+def _openrouter(topic, prompt, temperature):
     token = os.environ["OPENROUTER_API_KEY"]
     last_err = None
     for model in _openrouter_free_models():
         if not model.endswith(":free"):
-            continue  # hard guarantee: never call a paid model
+            continue
         try:
             r = requests.post(
                 "https://openrouter.ai/api/v1/chat/completions",
                 headers={"Authorization": f"Bearer {token}"},
                 json={
                     "model": model,
-                    "messages": [{"role": "user",
-                                  "content": PROMPT.format(topic=topic)}],
+                    "messages": [{"role": "user", "content": prompt}],
                     "max_tokens": 1400,
-                    "temperature": 0.8,
+                    "temperature": temperature,
                 },
                 timeout=120,
             )
@@ -161,7 +188,7 @@ def _openrouter(topic):
     raise RuntimeError(f"all OpenRouter free models failed: {last_err}")
 
 
-def _huggingface(topic):
+def _huggingface(topic, prompt, temperature):
     token = os.environ["HF_TOKEN"]
     last_err = None
     for model in HF_MODELS:
@@ -171,23 +198,22 @@ def _huggingface(topic):
                 headers={"Authorization": f"Bearer {token}"},
                 json={
                     "model": model,
-                    "messages": [{"role": "user", "content": PROMPT.format(topic=topic)}],
+                    "messages": [{"role": "user", "content": prompt}],
                     "max_tokens": 1400,
-                    "temperature": 0.8,
+                    "temperature": temperature,
                 },
                 timeout=120,
             )
             r.raise_for_status()
             content = r.json()["choices"][0]["message"]["content"]
             return _validate(_extract_json(content), topic)
-        except Exception as e:  # try the next model
+        except Exception as e:
             last_err = e
             print(f"    HF model {model} failed: {e}")
     raise RuntimeError(f"all HF models failed: {last_err}")
 
 
-def _local(topic):
-    """Run a quantized Qwen2.5-3B entirely on the runner's CPU (no API)."""
+def _local(topic, prompt, temperature):
     from llama_cpp import Llama
     from .local_models import ensure_llm
 
@@ -199,62 +225,53 @@ def _local(topic):
         verbose=False,
     )
     out = llm.create_chat_completion(
-        messages=[{"role": "user", "content": PROMPT.format(topic=topic)}],
+        messages=[{"role": "user", "content": prompt}],
         max_tokens=1400,
-        temperature=0.8,
+        temperature=temperature,
     )
     content = out["choices"][0]["message"]["content"]
     return _validate(_extract_json(content), topic)
 
 
-def _offline(topic):
-    """Zero-network template script. Not viral-grade, but the pipeline never dies."""
-    t = topic.strip().rstrip(".!?")
-    words = [w for w in re.findall(r"[A-Za-z]+", t) if len(w) > 3][:3]
-    kw = " ".join(words) if words else "abstract background"
-    scenes = [
-        {"narration": f"Here is what nobody tells you about {t}.",
-         "keyword": f"{kw} dramatic"},
-        {"narration": f"Most people get {t} completely wrong, and it costs them every single day.",
-         "keyword": f"{kw} city people"},
-        {"narration": "The first thing to understand is that small consistent actions beat big bursts of effort.",
-         "keyword": "person writing sunrise"},
-        {"narration": f"Second, the people who win with {t} focus on systems, not motivation.",
-         "keyword": "chess strategy closeup"},
-        {"narration": "Third, they track their progress, because what gets measured gets improved.",
-         "keyword": "notebook checklist desk"},
-        {"narration": f"Start applying this to {t} today, and follow for more insights like this.",
-         "keyword": "sunrise mountain success"},
-    ]
-    return {
-        "title": f"The Truth About {t.title()}"[:100],
-        "description": f"What nobody tells you about {t}.\nFollow for daily insights.\n"
-                       f"#shorts #{words[0].lower() if words else 'facts'} #motivation #learn #daily",
-        "tags": ["shorts", "facts", "education", "motivation"] + [w.lower() for w in words],
-        "hook": "Nobody tells you this",
-        "scenes": scenes,
-    }
+def generate_plan(topic, extra_context=None):
+    """Return (plan, provider_name, meta). Never raises -- offline always succeeds.
 
+    Every call builds a structurally unique prompt via ``build_prompt``,
+    so scripts from the same topic vary in format, voice, tone, hook, CTA,
+    pacing, and scene count.
 
-def generate_plan(topic):
-    """Return (plan, provider_name). Never raises — offline always succeeds."""
+    extra_context: optional dict with sheet-provided {title, hook, desc} to
+                   steer scene generation while keeping curated metadata.
+    """
+    import random
+
+    dyn_prompt, meta = build_prompt(topic, extra_context=extra_context)
+    rng = random.Random()
+    temp = _rand_temp(rng)
+
+    print(f"  script style: {meta['format']} | voice: {meta['voice']} | "
+          f"tone: {meta['tone']} | hook: {meta['hook_style']} | "
+          f"cta: {meta['cta']} | scenes: {meta['num_scenes']} | temp: {temp}")
+
     chain = []
+    if os.environ.get("GROQ_API_KEY"):
+        chain.append(("groq-llama3.3-70b", lambda: _groq(topic, dyn_prompt, temp)))
     if os.environ.get("GEMINI_API_KEY"):
-        chain.append(("gemini-flash", _gemini))
+        chain.append(("gemini-flash", lambda: _gemini(topic, dyn_prompt, temp)))
     if os.environ.get("OPENROUTER_API_KEY"):
-        chain.append(("openrouter-free", _openrouter))
+        chain.append(("openrouter-free", lambda: _openrouter(topic, dyn_prompt, temp)))
     if os.environ.get("HF_TOKEN"):
-        chain.append(("huggingface-router", _huggingface))
+        chain.append(("huggingface-router", lambda: _huggingface(topic, dyn_prompt, temp)))
     if os.environ.get("LOCAL_LLM", "").lower() in ("1", "true", "yes"):
-        chain.append(("local-qwen2.5-3b", _local))
-    chain.append(("offline-template", _offline))
+        chain.append(("local-qwen2.5-3b", lambda: _local(topic, dyn_prompt, temp)))
+    chain.append(("offline-builder", lambda: build_offline_script(topic, meta)))
 
     for name, fn in chain:
         try:
-            plan = fn(topic)
+            plan = fn()
             print(f"  script provider: {name}")
-            return plan, name
+            return plan, name, meta
         except Exception as e:
             print(f"  script provider {name} unavailable: {e}")
-    # unreachable — _offline cannot fail — but keep a hard fallback anyway
-    return _offline(topic), "offline-template"
+    plan = build_offline_script(topic, meta)
+    return plan, "offline-builder", meta

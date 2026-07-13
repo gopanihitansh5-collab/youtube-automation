@@ -4,10 +4,12 @@ models/
 *.mp4
 *.m4a
 *.srt
+*.ass
 # ...but DO commit background music you drop into assets/music/
 !assets/music/*
-client_secret.json
-service_account.json
+client_secret*.json
+service_account*.json
+code-vip-*.json
 __pycache__/
 *.pyc
 .env

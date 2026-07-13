@@ -1,5 +1,5 @@
 """
-Daily AI YouTube pipeline — orchestrator.
+Daily AI YouTube pipeline -- orchestrator.
 
 Design rule: THE VIDEO ALWAYS RENDERS. Every stage has a fallback chain
 (cloud API -> local model -> offline), so even with zero secrets and no
@@ -7,9 +7,9 @@ internet the run finishes with output/final.mp4 + output/metadata.json.
 Uploading to YouTube is best-effort on top of that.
 
   Google Sheet | topics.csv | built-in
-    -> Gemini | OpenRouter | HuggingFace | local Qwen GGUF | template   (script)
-    -> ElevenLabs | edge-tts | Piper local | espeak | silent            (voice)
-    -> Pexels | Pixabay | HF FLUX image | gradient                       (visuals)
+    -> Groq | Gemini | OpenRouter | HuggingFace | local Qwen GGUF | template   (script)
+    -> ElevenLabs | Kokoro local | edge-tts | espeak | silent                  (voice)
+    -> Pexels | Pixabay | gradient                                              (visuals)
     -> FFmpeg (Ken Burns, word-captions, zoom-hook, music, mux)
     -> YouTube upload + comment pin + thumbnail generation
     -> Sheet write-back (status + script metadata)
@@ -40,7 +40,7 @@ _load_dotenv()
 from src import sheets, editor  # noqa: E402
 from src.providers import llm, voice as voice_provider, visuals
 
-# Optional modules — silently skipped if missing or unconfigured
+# Optional modules -- silently skipped if missing or unconfigured
 try:
     from src import thumbnail as thumb_mod
 except ImportError:
@@ -59,6 +59,17 @@ def main():
     print("=== Daily AI Video Pipeline (full-feature edition) ===", flush=True)
     os.makedirs("output", exist_ok=True)
     report = {"providers": {}, "scenes": []}
+
+    # ---- 0) pre-download models for caching (best-effort) -----------------
+    try:
+        from src.providers.local_models import ensure_kokoro, ensure_llm
+        print("  downloading Kokoro TTS model (~350 MB) ...", flush=True)
+        ensure_kokoro()
+        if os.environ.get("LOCAL_LLM", "").strip() in ("1", "true", "yes"):
+            print("  downloading local LLM model (~2 GB) ...", flush=True)
+            ensure_llm()
+    except Exception as e:
+        print(f"  model pre-download skipped: {e}", flush=True)
 
     # ---- 0) analytics pre-check (optional) --------------------------------
     if analytics_mod:
@@ -80,23 +91,29 @@ def main():
           flush=True)
 
     # ---- 2) content plan -------------------------------------------------
+    meta = None
     pre_written = str(item.get("script_title") or "").strip()
     if pre_written and str(item.get("script_desc") or "").strip():
-        plan = {
+        sheet_ctx = {
             "title": pre_written,
-            "description": str(item.get("script_desc", "")).strip(),
-            "tags": [t.strip() for t in str(item.get("script_tags", "")).split(",") if t.strip()],
             "hook": str(item.get("script_hook") or "Watch till the end").strip(),
-            "scenes": None,
+            "desc": str(item.get("script_desc", "")).strip(),
         }
-        llm_used = "sheet-pre-written"
-        print(f"  Using pre-written script from sheet", flush=True)
+        plan, llm_used, meta = llm.generate_plan(topic, extra_context=sheet_ctx)
+        plan["title"] = pre_written
+        plan["hook"] = sheet_ctx["hook"]
+        plan["description"] = sheet_ctx["desc"]
+        plan["tags"] = [t.strip() for t in str(item.get("script_tags", "")).split(",") if t.strip()]
+        llm_used = f"sheet+{llm_used}"
+        print(f"  Sheet context -> {llm_used}", flush=True)
     else:
-        plan, llm_used = llm.generate_plan(topic)
+        plan, llm_used, meta = llm.generate_plan(topic)
 
-    if plan.get("scenes") is None:
+    if not plan.get("scenes"):
         offline = llm._offline(plan["title"])
         plan["scenes"] = offline["scenes"]
+        if not llm_used.startswith("sheet+"):
+            llm_used = "offline-fallback"
 
     report["providers"]["script"] = llm_used
     scenes = plan["scenes"]
@@ -106,13 +123,21 @@ def main():
     sheets.write_script_metadata(item, plan)
 
     # ---- 3) prepend hook-intro scene --------------------------------------
-    # A 2.5s+ intro: hook spoken by premium voice while text zooms in.
-    # Duration auto-adjusts to at least INTRO_DUR.
-    intro_scene = {"narration": hook, "keyword": "#intro"}
+    intro_scene = {
+        "narration": hook,
+        "keyword": (
+            "Dynamic intro scene with bold animated text overlay, "
+            "abstract geometric background, vibrant neon colors, "
+            "fast-paced cinematic motion blur, professional title card"
+        ),
+    }
     scenes.insert(0, intro_scene)
 
     # ---- 4) voiceover and visuals per scene, all in parallel --------------
-    from concurrent.futures import ThreadPoolExecutor
+    from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeout
+
+    _VOICE_TIMEOUT = 120
+    _VISUAL_TIMEOUT = 600
 
     def _voice_job(i_sc):
         i, sc = i_sc
@@ -120,18 +145,40 @@ def main():
 
     def _visual_job(i_sc):
         i, sc = i_sc
-        return visuals.get_visual(sc["keyword"], f"output/vis_{i}")
+        return visuals.get_visual(sc["keyword"], f"output/vis_{i}", scene_index=i)
+
+    voice_results = [None] * len(scenes)
+    visual_results = [None] * len(scenes)
 
     with ThreadPoolExecutor(max_workers=6) as pool:
-        voice_results = pool.map(_voice_job, enumerate(scenes))
-        visual_results = pool.map(_visual_job, enumerate(scenes))
-        voice_results = list(voice_results)
-        visual_results = list(visual_results)
+        voice_futs = {pool.submit(_voice_job, iv): iv for iv in enumerate(scenes)}
+        visual_futs = {pool.submit(_visual_job, iv): iv for iv in enumerate(scenes)}
+
+        for fut in as_completed(voice_futs, timeout=_VOICE_TIMEOUT * len(scenes)):
+            i, _ = voice_futs[fut]
+            try:
+                voice_results[i] = fut.result(timeout=10)
+            except FuturesTimeout:
+                print(f"  WARNING: voice scene {i} timed out after {_VOICE_TIMEOUT}s", flush=True)
+                voice_results[i] = (None, [], 0.0, "silent")
+            except Exception as e:
+                print(f"  WARNING: voice scene {i} failed: {e}", flush=True)
+                voice_results[i] = (None, [], 0.0, "silent")
+
+        for fut in as_completed(visual_futs, timeout=_VISUAL_TIMEOUT * len(scenes)):
+            i, _ = visual_futs[fut]
+            try:
+                visual_results[i] = fut.result(timeout=10)
+            except FuturesTimeout:
+                print(f"  WARNING: visual scene {i} timed out after {_VISUAL_TIMEOUT}s", flush=True)
+                visual_results[i] = (None, None, "gradient-fallback")
+            except Exception as e:
+                print(f"  WARNING: visual scene {i} failed: {e}", flush=True)
+                visual_results[i] = (None, None, "gradient-fallback")
 
     scene_audios, scene_words, durations, voice_used = [], [], [], set()
     for i, (path, words, used) in enumerate(voice_results):
         real = editor.probe_duration(path)
-        # Intro scene gets a minimum duration (enforce INTRO_DUR)
         if i == 0 and real < INTRO_DUR:
             print(f"  padding intro audio {real:.1f}s -> {INTRO_DUR}s", flush=True)
             padded = path.replace(".mp3", "_padded.mp3")
@@ -140,7 +187,6 @@ def main():
                          "-t", f"{INTRO_DUR:.2f}",
                          "-c:a", "libmp3lame", "-b:a", "128k", padded])
             path, real = padded, INTRO_DUR
-            # Extend last word timing to fill gap
             if words:
                 last_w = words[-1]
                 words[-1] = (last_w[0], last_w[1], max(last_w[2], INTRO_DUR))
@@ -154,13 +200,15 @@ def main():
 
     scene_visuals = []
     for i, (path, kind, used) in enumerate(visual_results):
-        scene_visuals.append((path, kind))
+        scene_visuals.append((path, kind, used))
         report["scenes"].append({"keyword": scenes[i]["keyword"], "visual": used})
         print(f"  scene {i}: visual={used}", flush=True)
 
     # ---- 5) render -------------------------------------------------------
+    scene_energies = meta.get("scene_energies") if meta else None
     final = editor.build(scene_visuals, scene_audios, scene_words,
-                         durations, hook, "output/final.mp4")
+                         durations, hook, "output/final.mp4",
+                         scene_energies=scene_energies)
     dur = editor.probe_duration(final)
     print(f"\nRendered: {final} ({dur:.1f}s)", flush=True)
 
@@ -188,9 +236,9 @@ def main():
     yt_ready = all(os.environ.get(k) for k in
                    ("YT_CLIENT_ID", "YT_CLIENT_SECRET", "YT_REFRESH_TOKEN"))
     if os.environ.get("SKIP_UPLOAD", "").lower() in ("1", "true", "yes"):
-        print("SKIP_UPLOAD set — video kept in output/ only.")
+        print("SKIP_UPLOAD set -- video kept in output/ only.")
     elif not yt_ready:
-        print("YouTube secrets not configured — video kept in output/ only.")
+        print("YouTube secrets not configured -- video kept in output/ only.")
     else:
         try:
             from src import youtube_upload
@@ -202,7 +250,7 @@ def main():
             print(f"Uploaded: {url}", flush=True)
             sheets.mark_done(item, url)
         except Exception as e:
-            print(f"WARNING: upload failed ({e}) — the rendered video is still "
+            print(f"WARNING: upload failed ({e}) -- the rendered video is still "
                   f"in output/final.mp4 and in the workflow artifact.")
 
     print("Done.", flush=True)

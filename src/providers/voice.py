@@ -1,12 +1,12 @@
 """Voiceover with a graceful provider chain.
 
 Order:
-  1. edge-tts   (free Microsoft neural voices, needs internet, no key,
-                 gives exact per-word timings for captions)
-  2. Piper      (neural TTS running LOCALLY on the runner — model downloaded
-                 once to ./models; word timings are estimated)
-  3. espeak-ng  (robotic but fully offline; word timings estimated)
-  4. silent     (caption-only video with background music — pipeline never dies)
+   1. Kokoro     (82M-param neural TTS running LOCALLY on the runner -- model
+                   downloaded once to ./models; word timings estimated)
+   2. edge-tts   (free Microsoft neural voices, needs internet, no key,
+                   gives exact per-word timings for captions)
+   3. espeak-ng  (robotic but fully offline; word timings estimated)
+   4. silent     (caption-only video with background music -- pipeline never dies)
 
 All providers return: (audio_path_or_None, [(word, start, end), ...], provider_name)
 Timings are relative to the start of this scene's audio.
@@ -27,7 +27,6 @@ def _estimate_timings(text, duration):
     words = _words_of(text)
     if not words:
         return []
-    # weight by word length so long words get a bit more screen time
     total = sum(len(w) + 2 for w in words)
     out, t = [], 0.0
     for w in words:
@@ -49,16 +48,16 @@ def _probe(path):
 async def _edge_async(text, voice, out_path):
     import edge_tts
     words = []
-    try:  # edge-tts >= 7 emits sentence boundaries unless asked for words
+    try:
         communicate = edge_tts.Communicate(text, voice, boundary="WordBoundary")
-    except TypeError:  # edge-tts 6.x has no `boundary` kwarg (words by default)
+    except TypeError:
         communicate = edge_tts.Communicate(text, voice)
     with open(out_path, "wb") as f:
         async for chunk in communicate.stream():
             if chunk["type"] == "audio":
                 f.write(chunk["data"])
             elif chunk["type"] == "WordBoundary":
-                start = chunk["offset"] / 1e7          # 100ns ticks -> seconds
+                start = chunk["offset"] / 1e7
                 end = (chunk["offset"] + chunk["duration"]) / 1e7
                 words.append((chunk["text"], start, end))
     if not words or os.path.getsize(out_path) < 1024:
@@ -71,19 +70,34 @@ def _edge(text, voice, out_path):
     return out_path, words
 
 
-# ------------------------------------------------------------------- piper
-def _piper(text, voice, out_path):
-    from .local_models import ensure_piper_voice
-    onnx, _cfg = ensure_piper_voice()
+# ----------------------------------------------------------------- kokoro
+_KOKORO_VOICES = ["af_heart", "af_bella", "af_sarah", "af_nova",
+                   "af_sky", "am_adam", "am_michael", "am_liam"]
+
+_KOKORO_VOICE_MAP = {
+    "en-US-AriaNeural": "af_heart", "en-US-JennyNeural": "af_bella",
+    "en-US-GuyNeural": "am_adam", "en-GB-SoniaNeural": "af_sarah",
+    "en-GB-RyanNeural": "am_michael", "en-US-AnaNeural": "af_nova",
+    "en-US-MichelleNeural": "af_sky", "en-US-SteffanNeural": "am_liam",
+}
+
+
+def _kokoro(text, voice, out_path):
+    import numpy as _np
+    import soundfile as _sf
+    from .local_models import ensure_kokoro
+
+    mapped = _KOKORO_VOICE_MAP.get(voice, "af_heart")
+    pipeline = ensure_kokoro()
+    gen = pipeline(text, voice=mapped, speed=1, split_pattern=r"\n+")
+    chunks = []
+    for _gs, _ps, audio in gen:
+        chunks.append(audio)
+    if not chunks:
+        raise RuntimeError("kokoro produced no audio")
+    full = _np.concatenate(chunks) if len(chunks) > 1 else chunks[0]
     wav = out_path + ".wav"
-    exe = shutil.which("piper")
-    if not exe:
-        raise RuntimeError("piper CLI not installed (pip install piper-tts)")
-    subprocess.run(
-        [exe, "-m", onnx, "-f", wav],
-        input=text.encode("utf-8"), check=True,
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-    )
+    _sf.write(wav, full, 24000)
     subprocess.run(["ffmpeg", "-y", "-i", wav, "-b:a", "192k", out_path],
                    check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     os.remove(wav)
@@ -105,7 +119,6 @@ def _espeak(text, voice, out_path):
 
 # ------------------------------------------------------------------ silent
 # -------------------------------------------------------------- elevenlabs
-# Common ElevenLabs voice name → ID mapping. Add more as needed.
 _ELEVEN_VOICES = {
     "Rachel": "21m00Tcm4TlvDq8ikWAM",
     "Adam": "pNInz6obpgDQGcFmaJgB",
@@ -126,22 +139,17 @@ _ELEVEN_VOICES = {
 
 
 def _eleven_voice_id(name):
-    """Resolve a voice name to an ElevenLabs voice ID.
-    Supports 'eleven:Name' prefix, bare voice names, and raw IDs."""
     if not name:
         return None
     raw = name.strip()
     if raw.startswith("eleven:"):
         raw = raw[7:].strip()
-    # If it's already a UUID-like ID, return as-is
     if len(raw) == 20 and raw.isascii() and "-" not in raw:
         return raw
-    # Try the name lookup
     return _ELEVEN_VOICES.get(raw)
 
 
 def _elevenlabs(text, voice, out_path):
-    """ElevenLabs TTS with word-level timestamps from the /with-timestamps endpoint."""
     import requests as _req
     import base64 as _b64
 
@@ -202,9 +210,8 @@ def synth(text, voice, out_path):
 
     If the `voice` parameter matches an ElevenLabs voice name (e.g. 'Rachel',
     'Adam', 'eleven:Rachel'), and ELEVENLABS_API_KEY is set, ElevenLabs is used
-    directly as the only provider — giving premium quality for important topics.
+    directly as the only provider -- giving premium quality for important topics.
     """
-    # Check for explicit ElevenLabs voice
     eleven_id = _eleven_voice_id(voice) if voice else None
     if eleven_id and os.environ.get("ELEVENLABS_API_KEY"):
         try:
@@ -212,10 +219,10 @@ def synth(text, voice, out_path):
             print(f"    voice provider: elevenlabs ({voice})")
             return path, words, f"elevenlabs-{voice}"
         except Exception as e:
-            print(f"    elevenlabs failed for '{voice}': {e} — falling through chain")
+            print(f"    elevenlabs failed for '{voice}': {e} -- falling through chain")
 
-    chain = [("edge-tts", _edge),
-             ("piper-local", _piper),
+    chain = [("kokoro-82m", _kokoro),
+             ("edge-tts", _edge),
              ("espeak-ng", _espeak), ("silent", _silent)]
     last_err = None
     for name, fn in chain:
