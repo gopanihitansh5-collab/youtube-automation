@@ -50,6 +50,7 @@ from topic_context import (TopicContext, parse_topic_context, store_context,
 from script_cache import (cache_script, load_cached_script, clear_cache,
                           save_run_state, get_run_state, is_step_completed,
                           clear_run_state, estimate_tokens, suggest_model)
+from caption_emphasis import tag_all_scenes
 
 # Module-level cache for trending context (populated by _get_topic, consumed by _generate_long_plan)
 _TRENDING_CTX = {"region_data": [], "best_video_topic": None, "global_pulse": ""}
@@ -698,6 +699,7 @@ def _generate_long_plan(topic, topic_ctx=None):
     import random
     if topic_ctx is None:
         topic_ctx = _TOPIC_CTX
+    meta = {}
 
     # Check if we already have a cached script
     cached = load_cached_script()
@@ -723,6 +725,23 @@ def _generate_long_plan(topic, topic_ctx=None):
                                 "summary": topic_ctx.summary(),
                                 "region": topic_ctx.target_region}
 
+    # Primary: Multi-LLM pipeline with reviewer agents
+    try:
+        plan, llm_chain, models_used = run_full_pipeline(topic, trending_context)
+        if plan and plan.get("chapters"):
+            total_scenes = sum(len(c.get("scenes", [])) for c in plan["chapters"])
+            if total_scenes >= 15:
+                print(f"  multi-LLM pipeline: {len(plan['chapters'])} ch, "
+                      f"{total_scenes} scenes via {llm_chain}", flush=True)
+                cache_script(plan, topic, llm_chain)
+                save_run_state("script_generated", {"topic": topic, "llm": llm_chain})
+                return plan, llm_chain, plan.get("meta", {})
+            print(f"  multi-LLM pipeline: only {total_scenes} scenes (<15), falling back",
+                  flush=True)
+    except Exception as e:
+        print(f"  multi-LLM pipeline failed ({e}), falling back to single-provider", flush=True)
+
+    # Fallback: single-provider chain
     dyn_prompt, meta = build_long_prompt(topic, trending_context=trending_context)
     rng = random.Random()
     temp = round(rng.uniform(0.65, 0.95), 2)
@@ -891,13 +910,27 @@ def main():
     if ch_ts:
         full_desc += f"\n\n{ch_ts}"
 
-    final = editor_build(
-        chapters, scene_visuals, scene_audios, scene_words,
-        chapter_durations, hook, "output_long/final.mp4",
-        title=plan.get("title", ""),
-        description=full_desc,
-        tags=plan.get("tags", []),
-    )
+    tagged_scene_words = tag_all_scenes(scene_words)
+
+    try:
+        final = editor_build(
+            chapters, scene_visuals, scene_audios, tagged_scene_words,
+            chapter_durations, hook, "output_long/final.mp4",
+            title=plan.get("title", ""),
+            description=full_desc,
+            tags=plan.get("tags", []),
+        )
+    except Exception as e:
+        print(f"  WARNING: editor_build failed ({e}), retrying without captions", flush=True)
+        import traceback
+        traceback.print_exc()
+        final = editor_build(
+            chapters, scene_visuals, scene_audios, [[] for _ in scene_words],
+            chapter_durations, hook, "output_long/final.mp4",
+            title=plan.get("title", ""),
+            description=full_desc,
+            tags=plan.get("tags", []),
+        )
     dur = probe_duration(final) if final and os.path.exists(final) else 0
     print(f"\nRendered: {final} ({dur:.1f}s)", flush=True)
     save_run_state("video_rendered", {"duration_sec": dur})

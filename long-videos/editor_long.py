@@ -314,6 +314,14 @@ def _write_ass(chapter_scenes, chapter_durs, path):
         "Style: W,DejaVu Sans,48,&H00FFFFFF,&H000000FF,&H00000000,"
         "&H80000000,-1,0,1,3,3,3,2,0,0,100,0,1"
     )
+    lines.append(
+        "Style: W_Keyword,DejaVu Sans,48,&H00FFD700,&H000000FF,&H00000000,"
+        "&H80000000,-1,0,1,3,3,3,2,0,0,100,0,1"
+    )
+    lines.append(
+        "Style: W_Emphasis,DejaVu Sans,48,&H00FFFFFF,&H000000FF,&H00000000,"
+        "&H80000000,0,-1,1,3,3,3,2,0,0,100,0,1"
+    )
     lines.append("")
     lines.append("[Events]")
     lines.append(
@@ -340,11 +348,20 @@ def _write_ass(chapter_scenes, chapter_durs, path):
                     end = start + 0.3
                 if end > global_offset + scene_offset + dur:
                     end = global_offset + scene_offset + dur
+                # Apply emphasis tag if present (4-tuple: word, start, end, tag)
+                tag = w[3] if len(w) >= 4 and w[3] in ("keyword", "emphasis") else "normal"
+                if tag == "keyword":
+                    style = "W_Keyword"
+                    ovr = "{\\an2\\b1\\fs48\\shad2\\bord2\\3c&H00000000&\\3a&HFF&}"
+                elif tag == "emphasis":
+                    style = "W_Emphasis"
+                    ovr = "{\\an2\\i1\\fs48\\shad2\\bord2\\3c&H00000000&\\3a&HFF&}"
+                else:
+                    style = "W"
+                    ovr = f"{{\\an2\\c{color}\\b1\\fs48\\shad2\\bord2\\3c&H00000000&\\3a&HFF&}}"
                 lines.append(
                     f"Dialogue: 0,{_fmt_ass_ts(start)},{_fmt_ass_ts(end)},"
-                    f"W,,0,0,0,,"
-                    f"{{\\an2\\c{color}\\b1\\fs48\\shad2\\bord2"
-                    f"\\3c&H00000000&\\3a&HFF&}}{raw}"
+                    f"{style},,0,0,0,,{ovr}{raw}"
                 )
             scene_offset += dur
         global_offset += sum(ch_dur)
