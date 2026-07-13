@@ -57,7 +57,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: models
-          key: local-models-v3
+          key: local-models-v4
 
       - name: Generate video (and upload if secrets are set)
         env:
@@ -70,8 +70,8 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           LOCAL_LLM: "1"
-          LOCAL_LLM_REPO: Qwen/Qwen2.5-7B-Instruct-GGUF
-          LOCAL_LLM_FILE: qwen2.5-7b-instruct-q3_k_m.gguf
+          LOCAL_LLM_REPO: Qwen/Qwen2.5-3B-Instruct-GGUF
+          LOCAL_LLM_FILE: qwen2.5-3b-instruct-q4_k_m.gguf
           # visual providers (all optional)
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
           PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
