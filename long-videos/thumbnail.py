@@ -99,21 +99,118 @@ def _sanitize(text):
     return re.sub(r'[^\x20-\x7E]', '', text).replace(":", " ").replace("'", "")
 
 
+def _classify_topic(title, hook):
+    t = (title + " " + hook).lower()
+    categories = {
+        "tech": ["ai", "technology", "software", "coding", "computer", "digital", "robot", "algorithm", "data", "quantum", "cyber", "programming", "app"],
+        "finance": ["money", "invest", "stock", "wealth", "financial", "economy", "crypto", "bitcoin", "market", "trading", "passive income", "recession"],
+        "science": ["science", "physics", "chemistry", "biology", "space", "universe", "evolution", "dna", "brain", "neuroscience", "memory", "sleep", "vaccine"],
+        "history": ["history", "ancient", "civilization", "war", "empire", "revolution", "origin", "rise and fall", "century"],
+        "psychology": ["psychology", "mind", "behavior", "cognitive", "bias", "persuasion", "habit", "procrastination", "stoic", "mental", "emotion"],
+        "motivation": ["success", "habit", "discipline", "focus", "productivity", "deep work", "wealth", "master", "goals", "growth"],
+        "nature": ["nature", "climate", "environment", "ocean", "space", "earth", "planet", "weather", "animal", "plant"],
+        "education": ["guide", "explained", "tutorial", "complete", "beginners", "learn", "course", "lesson", "how to", "breakdown"],
+    }
+    for cat, keywords in categories.items():
+        if any(kw in t for kw in keywords):
+            return cat
+    return "general"
+
+
+_VISUAL_STYLES = {
+    "tech": {
+        "palette": "neon blue, cyan, deep purple, dark background, holographic elements",
+        "lighting": "cyberpunk neon lighting, volumetric rays, blue/orange contrast",
+        "composition": "futuristic minimal, centered subject with glowing edge lines, digital particles floating",
+        "mood": "sleek, cutting-edge, sophisticated tech aesthetic",
+    },
+    "finance": {
+        "palette": "gold, deep green, dark navy, white, premium metallic accents",
+        "lighting": "dramatic studio lighting with golden rim light, soft cinematic shadows",
+        "composition": "professional clean layout, upward movement suggesting growth, bar charts or graphs as background elements",
+        "mood": "premium, authoritative, wealth-oriented, trustworthy",
+    },
+    "science": {
+        "palette": "deep blue, teal, white, purple highlights, microscopic detail colors",
+        "lighting": "laboratory cool lighting, edge-lit glass, bioluminescent glow",
+        "composition": "macro details, cellular patterns, cosmic backgrounds with depth",
+        "mood": "academic, fascinating, discovery-driven, mysterious",
+    },
+    "history": {
+        "palette": "sepia, dark amber, warm brown, parchment tones, aged gold",
+        "lighting": "dramatic chiaroscuro, candlelight warmth, dusty atmospheric rays",
+        "composition": "epic wide landscapes, ancient textures, weathered surfaces, archival mood",
+        "mood": "timeless, epic, scholarly, grand narrative",
+    },
+    "psychology": {
+        "palette": "deep indigo, soft lavender, warm amber, brain-wave blue",
+        "lighting": "soft diffused studio light, thought-bubble glow, split lighting",
+        "composition": "abstract neural patterns, double exposure, mirrored faces or brain silhouettes",
+        "mood": "introspective, revealing, thoughtful, mind-expanding",
+    },
+    "motivation": {
+        "palette": "warm orange, gold, deep red, bright white, sunrise gradients",
+        "lighting": "golden hour backlight, heroic rim lighting, dramatic sunrise rays",
+        "composition": "dynamic upward angles, person conquering obstacle, mountain peaks, expansive open sky",
+        "mood": "uplifting, powerful, transformative, triumphant",
+    },
+    "nature": {
+        "palette": "emerald green, sky blue, warm earth tones, golden sunlight",
+        "lighting": "natural golden hour, soft diffused forest light, underwater caustics",
+        "composition": "wide panoramic landscapes, macro nature details, atmospheric depth, bioluminescence",
+        "mood": "awe-inspiring, serene, majestic, connected",
+    },
+    "education": {
+        "palette": "clean white, academic blue, warm orange accent, charcoal",
+        "lighting": "clean bright studio lighting, softbox key light, bright and clear",
+        "composition": "organized clean layout, book or digital screen elements, lightbulb or brain motifs",
+        "mood": "clear, authoritative, accessible, knowledge-focused",
+    },
+    "general": {
+        "palette": "vibrant red, electric blue, bright white, deep black contrast",
+        "lighting": "cinematic dramatic lighting with strong contrast, rim light on subject",
+        "composition": "dynamic diagonal composition, centered focal point with negative space for text, depth layers",
+        "mood": "engaging, clickable, energetic, premium YouTube aesthetic",
+    },
+}
+
+
 def generate_base(title, hook, out_path, api_key=None):
-    """Generate base thumbnail image via Imagen 4."""
+    """Generate base thumbnail image via Imagen 4 with dynamic topic-adaptive prompt."""
     key = api_key or os.environ.get("GEMINI_API_KEY")
     if not key:
         print("  GEMINI_API_KEY not set for Imagen 4", flush=True)
         return None
 
+    import random
+    rng = random.Random()
+
+    cat = _classify_topic(title, hook)
+    style = _VISUAL_STYLES.get(cat, _VISUAL_STYLES["general"])
+
+    mood_extras = [
+        "photorealistic, 8K resolution, highly detailed",
+        "cinematic shot, volumetric lighting, deep shadows",
+        "trending YouTube thumbnail aesthetic, high click-through rate design",
+        "professional graphic design composition, balanced negative space",
+        "dramatic atmosphere with depth of field and atmospheric haze",
+        "bold visual metaphor that instantly communicates the video concept",
+    ]
+    extra = rng.choice(mood_extras)
+
     prompt = (
-        f"YouTube thumbnail for video: '{title}'. "
-        f"Hook: '{hook}'. "
-        f"Modern clickable YouTube style, 16:9 landscape, 1280x720, "
-        f"high contrast, vibrant colors, cinematic lighting, "
-        f"professional composition, space for text overlay at bottom third, "
-        f"photorealistic, trending YouTube aesthetic, bold colors, "
-        f"clean composition, no text in the image itself."
+        f"Professional YouTube thumbnail for video titled '{title}'. "
+        f"Core hook: '{hook}'. "
+        f"16:9 landscape, 1280x720. "
+        f"Style: {cat.upper()} category aesthetic. "
+        f"Color palette: {style['palette']}. "
+        f"Lighting: {style['lighting']}. "
+        f"Composition: {style['composition']}. "
+        f"Mood: {style['mood']}. "
+        f"{extra}. "
+        f"CLEAN COMPOSITION: large empty area in bottom third for text overlay. "
+        f"No text, no watermarks, no logos in the image. "
+        f"No cluttered backgrounds. Keep focal point clear and centered."
     )
 
     try:

@@ -18,7 +18,16 @@ CHAPTER_XFADE_DUR = 1.2
 SCENE_XFADE_DUR = 0.4
 
 TRANSITION_STYLES = ["fade", "slideleft", "slideright", "fadeblack",
-                     "fadewhite", "pixelize", "glow"]
+                     "fadewhite", "pixelize", "glow", "hslbright",
+                     "smoothleft", "smoothright", "circlepaint"]
+
+# Brand color palette — consistent across all channel videos
+BRAND_PALETTES = [
+    ("#0f172a", "#1e293b", "#334155", "#FFD700"),  # Dark navy + gold
+    ("#0a0a1a", "#1a1a3e", "#2d1b69", "#FF6B35"),  # Deep purple + orange
+    ("#0f0f23", "#1e293b", "#3b82f6", "#F59E0B"),  # Slate + blue + amber
+    ("#0d1117", "#161b22", "#58a6ff", "#F0F6FC"),  # GitHub dark + blue
+]
 
 FONT_CANDIDATES = [
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
@@ -514,6 +523,17 @@ def build(chapters, scene_visuals, scene_audios, scene_words,
     music = _pick_music()
     cmd = ["ffmpeg", "-y", "-i", base_video, "-i", voice]
 
+    brand_idx = datetime.date.today().toordinal() % len(BRAND_PALETTES)
+    brand = BRAND_PALETTES[brand_idx]
+
+    color_grade = (
+        f"eq=contrast=1.1:brightness=0.02:saturation=1.15:gamma=1.05,"
+        f"colorbalance=rs=0.05:gs=-0.02:bs=-0.03:rh=0.02:gh=0.0:bh=-0.02,"
+        f"unsharp=5:5:0.6:3:3:0.3"
+    )
+
+    vf_color = f"{vf},{color_grade}"
+
     audio_filter = f"[1:a]{LOUD}[vo]"
     audio_maps = "-map", "[vo]"
     if music:
@@ -528,7 +548,7 @@ def build(chapters, scene_visuals, scene_audios, scene_words,
 
     meta_file = _build_metadata(chapters, title, description, tags or [])
 
-    filter_complex = f"[0:v]{vf}[v]"
+    filter_complex = f"[0:v]{vf_color}[v]"
     cmd += [
         "-filter_complex", f"{filter_complex};{audio_filter}",
         "-map", "[v]", *audio_maps,
@@ -541,6 +561,7 @@ def build(chapters, scene_visuals, scene_audios, scene_words,
         "-metadata", f"title={title[:80]}",
         "-metadata", f"description={description[:200]}",
         "-metadata", "genre=Education",
+        "-metadata", "comment=Brand: long-form educational deep dives",
         "-shortest",
         "-movflags", "+faststart",
         out_path,

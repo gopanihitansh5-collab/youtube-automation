@@ -10,6 +10,7 @@ import sys
 import csv
 import json
 import re
+import random
 import datetime
 import traceback
 
@@ -38,6 +39,18 @@ from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as
 
 from src import sheets
 from src.providers import voice as voice_provider, visuals
+from done_tracker import is_done, mark_done, filter_undone
+from web_search_tool import (search_web, get_daily_briefing, get_trending_news,
+                             get_multi_region_trends, search_web_by_region,
+                             get_india_major_events,
+                             REGIONS, PRIORITY_REGIONS)
+from topic_context import (TopicContext, parse_topic_context, store_context,
+                           build_script_context_block, build_thumbnail_context,
+                           build_transcript_context, integrate_context_into_pipeline)
+
+# Module-level cache for trending context (populated by _get_topic, consumed by _generate_long_plan)
+_TRENDING_CTX = {"region_data": [], "best_video_topic": None, "global_pulse": ""}
+_TOPIC_CTX: TopicContext | None = None  # parsed topic context, used by all pipeline stages
 
 LONG_CSV = os.path.join(os.path.dirname(__file__), "topics_long.csv")
 
@@ -51,26 +64,408 @@ LONG_FALLBACK = [
 ]
 
 
-def _get_topic():
-    if os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON") and os.environ.get("SHEET_ID"):
+def _sheet_available():
+    return bool(os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON") and os.environ.get("SHEET_ID"))
+
+
+def _from_sheet_long():
+    """Get next undone topic from sheet, filtering for long-form type if column exists."""
+    ws = sheets._worksheet()
+    for i, rec in enumerate(ws.get_all_records()):
+        status = str(rec.get("status", "")).strip().lower()
+        if status not in ("", "pending", "todo", "queue", "queued"):
+            continue
+        rec = {str(k).lower(): v for k, v in rec.items()}
+        typ = str(rec.get("type", "")).strip().lower()
+        if typ and typ not in ("long", "long-form", "longform", "video"):
+            continue
+        return {"row_idx": i + 2, "source": "google-sheet", **rec}
+    return None
+
+
+def _fetch_regional_trends():
+    """Fetch trending topics across USA, Australia, UK, India, etc. via web search.
+    
+    Populates the module-level _TRENDING_CTX cache.
+    """
+    global _TRENDING_CTX
+    if not os.environ.get("GEMINI_API_KEY"):
+        print("  no Gemini key — skipping region trend search", flush=True)
+        return
+
+    print("  fetching trending topics across regions (US, AU, UK, IN, CA, SG)...", flush=True)
+    try:
+        briefing = get_daily_briefing(region_codes=["us", "au", "uk", "in", "ca", "sg"])
+        if briefing.get("status") == "ok":
+            _TRENDING_CTX["region_data"] = briefing.get("regions", [])
+            best = briefing.get("recommended_video_topic", {})
+            _TRENDING_CTX["best_video_topic"] = best
+            _TRENDING_CTX["global_pulse"] = briefing.get("cross_region_trends", "")
+            regions_found = len(_TRENDING_CTX["region_data"])
+            print(f"  region trends: {regions_found} regions sourced | "
+                  f"best: {best.get('topic','')[:60]!r}", flush=True)
+        else:
+            print(f"  region trend search failed: {briefing.get('error')}", flush=True)
+    except Exception as e:
+        print(f"  region trend search error: {e}", flush=True)
+        # Corrigendum — if get_daily_briefing fails, try multi-region
         try:
-            item = sheets._from_sheet()
-            if item:
-                return item
+            alt = get_multi_region_trends()
+            if alt.get("status") == "ok":
+                _TRENDING_CTX["region_data"] = alt.get("regions", [])
+                best = alt.get("best_video_topic", {})
+                _TRENDING_CTX["best_video_topic"] = best
+                _TRENDING_CTX["global_pulse"] = alt.get("global_pulse", "")
+                print(f"  alt region trends: {len(_TRENDING_CTX['region_data'])} regions",
+                      flush=True)
+        except Exception as e2:
+            print(f"  alt region search also failed: {e2}", flush=True)
+
+
+def _region_trends_summary():
+    """Build a human-readable summary of the cached regional trending context."""
+    ctx = _TRENDING_CTX
+    lines = []
+    best = ctx.get("best_video_topic", {})
+    if best and best.get("topic"):
+        lines.append(f"BEST VIDEO TOPIC GLOBALLY: \"{best['topic']}\"")
+        lines.append(f"  Region: {best.get('region', 'global')} | Reason: {best.get('reason', '')}")
+    pulse = ctx.get("global_pulse", "")
+    if pulse:
+        lines.append(f"GLOBAL PULSE: {pulse}")
+    for region in ctx.get("region_data", []):
+        rname = region.get("region_name", region.get("region_code", "")).upper()
+        top = region.get("top_trending", "")
+        ideas = region.get("video_ideas", [])
+        if top:
+            lines.append(f"[{rname}] Trending: {top}")
+        if ideas:
+            for idea in ideas[:2]:
+                lines.append(f"  Video idea: {idea}")
+        briefings = region.get("briefings", [])
+        for b in briefings:
+            cat = b.get("category", "general")
+            hl = b.get("headlines", [])
+            if hl:
+                lines.append(f"  {cat.upper()}: {' | '.join(hl[:2])}")
+    return "\n".join(lines)
+
+
+def _pick_topic_from_trends():
+    """LLM picks ONE specific topic from live trends and researches it with full context.
+    
+    Returns a dict with the selected topic + full research context, or None.
+    """
+    key = os.environ.get("GEMINI_API_KEY")
+    if not key:
+        return None
+
+    region_summary = _region_trends_summary()
+    if not region_summary:
+        return None
+
+    print("  LLM picking ONE specific topic from live trends...", flush=True)
+
+    prompt = (
+        "CRITICAL: Use search-grounding for LIVE data. Only THIS WEEK's news.\n\n"
+        f"Today is {datetime.date.today().isoformat()}.\n\n"
+        f"Below are LIVE trending topics across USA, Australia, UK, India, Canada, Singapore:\n\n"
+        f"{region_summary}\n\n"
+        "TASK: Pick EXACTLY ONE topic for a long-form educational YouTube video (8-15 min).\n"
+        "Then search the web LIVE for DETAILED information about that ONE topic:\n"
+        "- Latest news, developments, key facts\n"
+        "- Specific data points, statistics, recent studies\n"
+        "- Real examples, names, dates, sources\n"
+        "- Why this matters RIGHT NOW\n\n"
+        "Return ONLY valid JSON:\n"
+        "{\n"
+        "  \"selected_topic\": \"the exact video title (60-80 chars)\",\n"
+        "  \"target_region\": \"us/au/uk/in/...\",\n"
+        "  \"reason_picked\": \"why THIS topic over all others\",\n"
+        "  \"hook\": \"one-sentence hook that opens the video\",\n"
+        "  \"topic_context\": {\n"
+        "    \"what_happened\": \"2-3 sentences on the specific event/news driving this topic\",\n"
+        "    \"why_now\": \"why this is relevant THIS WEEK\",\n"
+        "    \"key_facts\": [\"fact 1 with specific numbers/dates\", \"fact 2\", \"fact 3\"],\n"
+        "    \"news_headlines\": [\"recent headline 1\", \"recent headline 2\"],\n"
+        "    \"sources\": [\"source URL or publication\"]\n"
+        "  },\n"
+        "  \"video_angle\": \"the specific angle/narrative for this video\"\n"
+        "}\n\n"
+        "Be decisive. Pick ONE. No markdown. Pure JSON."
+    )
+
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "temperature": 0.3,
+            "maxOutputTokens": 4096,
+        },
+        "tools": [{"googleSearchRetrieval": {}}],
+    }
+
+    for model in GEMINI_MODELS[:3]:
+        try:
+            r = requests.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                headers={"x-goog-api-key": key},
+                json=payload,
+                timeout=90,
+            )
+            r.raise_for_status()
+            body = r.json()
+            text = body["candidates"][0]["content"]["parts"][0]["text"]
+            sources = body.get("candidates", [{}])[0].get("groundingMetadata", {}).get("groundingChunks", [])
+            data = _extract_json(text)
+            topic = (data.get("selected_topic") or "").strip()
+            if not topic:
+                continue
+            ctx = data.get("topic_context", {})
+            print(f"  LLM picked: {topic!r} | region={data.get('target_region','')} | "
+                  f"{len(ctx.get('key_facts',[]))} facts | {len(sources)} sources", flush=True)
+            return {
+                "topic": topic,
+                "voice": "en-US-AriaNeural",
+                "privacy": "unlisted",
+                "source": f"trending-pick-{data.get('target_region','global')}",
+                "row_idx": None,
+                "_hook": data.get("hook", ""),
+                "_reason": data.get("reason_picked", ""),
+                "_region": data.get("target_region", ""),
+                "_video_angle": data.get("video_angle", ""),
+                "_topic_context": ctx,
+            }
         except Exception as e:
-            print(f"Sheet unavailable ({e}) -> long CSV", flush=True)
-    if os.path.exists(LONG_CSV):
+            print(f"    Gemini pick model {model} failed: {e}", flush=True)
+    return None
+
+
+def _gemini_trending_eval(candidate_topic):
+    """Use Gemini w/ search grounding + regional context to check topic.
+    
+    Returns (is_trending: bool, suggested_topic: str | None, source: str).
+    """
+    key = os.environ.get("GEMINI_API_KEY")
+    if not key:
+        return False, None, "no-gemini-key"
+
+    region_summary = _region_trends_summary()
+
+    prompt = (
+        f"CRITICAL: You MUST use search-grounding to fetch LIVE, REAL-TIME data. "
+        f"Do NOT rely on your training data. Only consider information published "
+        f"within the LAST 7 DAYS.\n\n"
+        f"You are a YouTube trends analyst monitoring the USA, Australia, UK, India, "
+        f"Canada, and Singapore markets.\n\n"
+        f"A long-form educational channel has this topic in its backlog:\n"
+        f"\"{candidate_topic}\"\n\n"
+        f"CURRENT REGIONAL TRENDS (LIVE from web search):\n"
+        f"{region_summary if region_summary else '(No regional data available)'}\n\n"
+        f"Task:\n"
+        f"1. Search LIVE — is \"{candidate_topic}\" TRENDING RIGHT NOW (this week) "
+        f"in ANY of these regions (USA, Australia, UK, India, Canada, Singapore)?\n"
+        f"2. If YES → {{\"trending\": true, \"reason\": \"...which region(s) and why this week\"}}\n"
+        f"3. If NO → {{\"trending\": false, \"reason\": \"...why stale this week\", "
+        f"\"suggested_topic\": \"...a FRESH trending topic from THIS WEEK's data\", "
+        f"\"target_region\": \"us/au/uk/in/...\", "
+        f"\"trend_evidence\": \"...LIVE news headline proving it's hot this week\"}}\n\n"
+        f"Rules:\n"
+        f"- Only consider REAL news/events from THIS WEEK\n"
+        f"- Prefer topics already trending across MULTIPLE regions\n"
+        f"- Topic must be worthy of an 8-15 minute educational deep dive\n"
+        f"- suggested_topic should be a compelling YouTube title (60-80 chars)\n"
+        f"- Return ONLY valid JSON, no markdown, no extra text."
+    )
+
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "temperature": 0.3,
+            "maxOutputTokens": 1024,
+        },
+        "tools": [{"googleSearchRetrieval": {}}],
+    }
+    for model in GEMINI_MODELS[:3]:
+        try:
+            r = requests.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                headers={"x-goog-api-key": key},
+                json=payload,
+                timeout=60,
+            )
+            r.raise_for_status()
+            body = r.json()
+            text = body["candidates"][0]["content"]["parts"][0]["text"]
+            sources = body.get("candidates", [{}])[0].get("groundingMetadata", {}).get("groundingChunks", [])
+            data = _extract_json(text)
+            is_t = data.get("trending", False)
+            suggested = data.get("suggested_topic", "").strip() or None
+            region_tag = data.get("target_region", "global")
+            print(f"  trending eval: {'TRENDING' if is_t else 'STALE'} | region={region_tag} | "
+                  f"{data.get('reason','')[:60]} | {len(sources)} sources", flush=True)
+            return is_t, suggested, f"gemini-{model}-{region_tag}-eval"
+        except Exception as e:
+            print(f"    Gemini eval model {model} failed: {e}", flush=True)
+    return False, None, "gemini-eval-failed"
+
+
+def _llm_suggest_trending_topic():
+    """Ask Gemini search-grounded to generate a fresh trending topic from regional data."""
+    key = os.environ.get("GEMINI_API_KEY")
+    if not key:
+        return None
+
+    region_summary = _region_trends_summary()
+
+    prompt = (
+        "CRITICAL: You MUST use search-grounding to fetch LIVE, REAL-TIME data. "
+        "Do NOT rely on your training data. Only consider THIS WEEK's news.\n\n"
+        "You are a YouTube trends researcher monitoring USA, Australia, UK, India, "
+        "Canada, and Singapore markets.\n\n"
+        f"CURRENT REGIONAL TRENDS (LIVE):\n"
+        f"{region_summary if region_summary else '(search the web live yourself)'}\n\n"
+        "Search LIVE for ONE topic that is TRENDING THIS WEEK across multiple countries "
+        "and worthy of an 8-15 minute educational deep-dive video on YouTube.\n\n"
+        "Return ONLY valid JSON:\n"
+        "{\n"
+        "  \"topic\": \"...compelling video title (60-80 chars)\",\n"
+        "  \"target_region\": \"us/au/uk/in/...\",\n"
+        "  \"reason\": \"...why it's trending THIS WEEK in that region\",\n"
+        "  \"trend_evidence\": \"...LIVE news headline or source from this week\",\n"
+        "  \"hook\": \"...a 1-sentence hook to open the video\"\n"
+        "}\n\n"
+        "No markdown. No extra text. Pure JSON."
+    )
+
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "temperature": 0.5,
+            "maxOutputTokens": 1024,
+        },
+        "tools": [{"googleSearchRetrieval": {}}],
+    }
+    for model in GEMINI_MODELS[:3]:
+        try:
+            r = requests.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                headers={"x-goog-api-key": key},
+                json=payload,
+                timeout=60,
+            )
+            r.raise_for_status()
+            body = r.json()
+            text = body["candidates"][0]["content"]["parts"][0]["text"]
+            data = _extract_json(text)
+            topic = data.get("topic", "").strip()
+            if not topic:
+                continue
+            sources = body.get("candidates", [{}])[0].get("groundingMetadata", {}).get("groundingChunks", [])
+            region = data.get("target_region", "global")
+            print(f"  trending-LLM suggested: {topic!r} | region={region} | "
+                  f"{len(sources)} sources", flush=True)
+            return {"topic": topic, "voice": "en-US-AriaNeural", "privacy": "unlisted",
+                    "source": f"trending-llm-{region}", "row_idx": None,
+                    "_hook": data.get("hook", ""), "_reason": data.get("reason", ""),
+                    "_region": region}
+        except Exception as e:
+            print(f"    Gemini trending model {model} failed: {e}", flush=True)
+    return None
+
+
+def _get_topic():
+    global _TOPIC_CTX
+    has_sheet = _sheet_available()
+
+    candidate_item = None
+    candidate_source = None
+
+    # --- 1. Try sheet ---
+    if has_sheet:
+        try:
+            candidate_item = _from_sheet_long()
+            if candidate_item:
+                candidate_source = "google-sheet"
+                print(f"Sheet candidate: {candidate_item.get('topic','')!r}", flush=True)
+            else:
+                print("Sheet reachable: all long rows done", flush=True)
+        except Exception as e:
+            print(f"Sheet unavailable ({e})", flush=True)
+    else:
+        print("No sheet credentials", flush=True)
+
+    # --- 2. Try CSV ---
+    if not candidate_item and os.path.exists(LONG_CSV):
         try:
             with open(LONG_CSV, newline="", encoding="utf-8-sig") as f:
                 rows = [r for r in csv.DictReader(f) if (r.get("topic") or "").strip()]
-            if rows:
-                pick = rows[datetime.date.today().timetuple().tm_yday % len(rows)]
-                return {"row_idx": None, "source": "topics_long.csv", **pick}
+            undone = filter_undone(rows)
+            if undone:
+                pick = random.Random(datetime.date.today().isoformat()).choice(undone)
+                candidate_item = pick
+                candidate_source = "topics_long.csv"
+                print(f"CSV candidate: {pick.get('topic','')!r}", flush=True)
+            else:
+                print("CSV topics all done", flush=True)
         except Exception as e:
-            print(f"long CSV error ({e}) -> built-in", flush=True)
-    pick = LONG_FALLBACK[
-        datetime.date.today().timetuple().tm_yday % len(LONG_FALLBACK)]
-    return {"row_idx": None, "source": "built-in", **pick}
+            print(f"CSV error ({e})", flush=True)
+
+    # --- 3. Try built-in ---
+    if not candidate_item:
+        undone_fallback = filter_undone(LONG_FALLBACK)
+        if undone_fallback:
+            pick = random.Random(datetime.date.today().isoformat()).choice(undone_fallback)
+            candidate_item = pick
+            candidate_source = "built-in"
+            print(f"Built-in candidate: {pick.get('topic','')!r}", flush=True)
+
+    # --- 4. LLM trending evaluation + suggestion from trends ---
+    gemini_eval_possible = bool(os.environ.get("GEMINI_API_KEY"))
+
+    if gemini_eval_possible:
+        # Fetch live regional trends first
+        _fetch_regional_trends()
+
+        # Try to pick a decisive topic from LIVE trends
+        picked = _pick_topic_from_trends()
+        if picked:
+            print(f"  → LLM picked from LIVE trends: {picked.get('topic','')!r}", flush=True)
+            _TOPIC_CTX = parse_topic_context(picked, "trending-pick")
+            store_context(_TOPIC_CTX)
+            return {"row_idx": None, "source": picked.get("source", "trending-pick"), **picked}
+
+        # Trends unavailable — evaluate candidate topic
+        if candidate_item:
+            topic = candidate_item.get("topic", "").strip()
+            if topic:
+                is_trending, suggested_topic, eval_source = _gemini_trending_eval(topic)
+                if not is_trending and suggested_topic:
+                    print(f"  → stale: LLM suggests FRESH topic: {suggested_topic!r}", flush=True)
+                    candidate_item = {"topic": suggested_topic,
+                                      "voice": candidate_item.get("voice", "en-US-AriaNeural"),
+                                      "privacy": candidate_item.get("privacy", "unlisted")}
+                    candidate_source = f"{candidate_source}+trending-boost"
+
+    if candidate_item:
+        item = {"row_idx": None, "source": candidate_source, **candidate_item}
+        _TOPIC_CTX = parse_topic_context(item, candidate_source)
+        store_context(_TOPIC_CTX)
+        return item
+
+    # --- 5. All static sources exhausted — LLM live generation ---
+    if gemini_eval_possible:
+        print("All static topics exhausted → asking LLM to generate LIVE trending topic...", flush=True)
+        llm_item = _llm_suggest_trending_topic()
+        if llm_item:
+            _TOPIC_CTX = parse_topic_context(llm_item, "trending-llm-live")
+            store_context(_TOPIC_CTX)
+            return llm_item
+
+    raise RuntimeError("ALL topic sources exhausted (sheet + CSV + built-in + LLM). "
+                       "Add new topics or reset done_topics.json")
 from longform_prompt import build_long_prompt, build_offline_long_script
 from editor_long import build as editor_build, probe_duration
 from thumbnail import make as make_thumbnail
@@ -131,6 +526,7 @@ def _validate_long(data, topic):
         "comment": str(data.get("comment") or "What did you think?")[:300],
         "virality_score": max(0.0, min(1.0, float(data.get("virality_score", 0)))),
         "attention_score": max(0.0, min(1.0, float(data.get("attention_score", 0)))),
+        "authenticity_score": max(0.0, min(1.0, float(data.get("authenticity_score", 0)))),
         "chapters": valid_chapters,
     }
 
@@ -267,9 +663,20 @@ def _huggingface_long(topic, prompt, temperature):
     raise RuntimeError(f"all HF models failed: {last_err}")
 
 
-def _generate_long_plan(topic):
+def _generate_long_plan(topic, topic_ctx=None):
     import random
-    dyn_prompt, meta = build_long_prompt(topic)
+    if topic_ctx is None:
+        topic_ctx = _TOPIC_CTX
+
+    trending_context = None
+    if topic_ctx:
+        context_block = build_script_context_block(topic_ctx)
+        if context_block:
+            trending_context = {"context_block": context_block,
+                                "summary": topic_ctx.summary(),
+                                "region": topic_ctx.target_region}
+
+    dyn_prompt, meta = build_long_prompt(topic, trending_context=trending_context)
     rng = random.Random()
     temp = round(rng.uniform(0.65, 0.95), 2)
 
@@ -331,7 +738,7 @@ def main():
     print(f"Topic [{item['source']}]: {topic!r} | voice={voice_name} | privacy={privacy}",
           flush=True)
 
-    plan, llm_used, meta = _generate_long_plan(topic)
+    plan, llm_used, meta = _generate_long_plan(topic, topic_ctx=_TOPIC_CTX)
     report["providers"]["script"] = llm_used
     chapters = plan["chapters"]
     hook = plan["hook"]
@@ -340,9 +747,10 @@ def main():
 
     v = plan.get("virality_score", 0)
     a = plan.get("attention_score", 0)
-    if v < 0.65 or a < 0.65:
-        print(f"  WARNING: scores ({v:.2f}, {a:.2f}) below 0.65 threshold",
-              flush=True)
+    auth = plan.get("authenticity_score", 0)
+    if v < 0.65 or a < 0.65 or auth < 0.75:
+        print(f"  WARNING: scores (v={v:.2f}, a={a:.2f}, auth={auth:.2f}) "
+              f"below threshold", flush=True)
 
     sheets.write_script_metadata(item, plan)
 
@@ -441,15 +849,21 @@ def main():
     dur = probe_duration(final) if final and os.path.exists(final) else 0
     print(f"\nRendered: {final} ({dur:.1f}s)", flush=True)
 
+    if item.get("source") != "google-sheet":
+        mark_done(topic, "rendered")
+        print(f"  done-tracker: marked {topic!r} as done", flush=True)
+
     thumb_path = "output_long/thumbnail.jpg"
     try:
         print("  generating enhanced thumbnail ...", flush=True)
+        thumb_ctx = build_thumbnail_context(_TOPIC_CTX) if _TOPIC_CTX else {}
         make_thumbnail(
             title=plan.get("title", ""),
-            hook=hook,
+            hook=thumb_ctx.get("hook") or hook,
             video_path=final,
             out_path=thumb_path,
             style="bold_split",
+            extra_context=thumb_ctx,
         )
     except Exception as e:
         print(f"  thumbnail generation failed: {e}", flush=True)
@@ -461,6 +875,8 @@ def main():
         "privacy": privacy, "youtube_url": None,
         "thumbnail": thumb_path if os.path.exists(thumb_path) else None,
     })
+    if _TOPIC_CTX:
+        report["topic_context"] = _TOPIC_CTX.to_dict()
     with open("output_long/metadata.json", "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2, ensure_ascii=False)
 

@@ -46,90 +46,92 @@ def _recently_used(combo, threshold=3):
 
 
 LONG_FORM_ARCS = [
-    {"name": "educational_deep_dive", "description": "Teach a concept from first principles, building understanding layer by layer", "chapters": (5, 8)},
-    {"name": "documentary", "description": "Chronological exploration of a topic with historical context and key milestones", "chapters": (5, 7)},
-    {"name": "case_study", "description": "Deep analysis of one specific example, event, or subject with forensic detail", "chapters": (4, 6)},
-    {"name": "explainer", "description": "How something works, step by step, breaking down complexity into digestible parts", "chapters": (5, 8)},
-    {"name": "analysis", "description": "Data-driven breakdown of a situation, trend, or phenomenon with evidence", "chapters": (4, 7)},
-    {"name": "tutorial", "description": "Actionable guide with clear steps the viewer can follow and apply immediately", "chapters": (5, 7)},
-    {"name": "comparison", "description": "Side-by-side examination of two approaches, systems, or philosophies", "chapters": (4, 6)},
-    {"name": "debate", "description": "Present both sides of a controversial topic with fair treatment of each", "chapters": (4, 6)},
+    {"name": "educational_deep_dive", "description": "Teach a concept from first principles, building understanding layer by layer with clear progression", "chapters": (5, 8)},
+    {"name": "documentary", "description": "Chronological exploration of a topic with historical context, key milestones, and primary sources", "chapters": (5, 7)},
+    {"name": "case_study", "description": "Deep forensic analysis of one specific example, event, or subject with granular detail", "chapters": (4, 6)},
+    {"name": "explainer", "description": "How something works, step by step, breaking down complexity into digestible mental models", "chapters": (5, 8)},
+    {"name": "analysis", "description": "Data-driven breakdown of a situation, trend, or phenomenon with statistical evidence", "chapters": (4, 7)},
+    {"name": "tutorial", "description": "Actionable guide with clear steps the viewer can follow and apply immediately in real life", "chapters": (5, 7)},
+    {"name": "comparison", "description": "Side-by-side examination of two approaches, systems, or philosophies with balanced evaluation", "chapters": (4, 6)},
+    {"name": "debate", "description": "Present both sides of a controversial topic with rigorous fair treatment of each position", "chapters": (4, 6)},
+    {"name": "investigative", "description": "Follow evidence and clues to uncover hidden truths or expose misconceptions layer by layer", "chapters": (5, 8)},
+    {"name": "philosophical", "description": "Explore fundamental questions about meaning, existence, knowledge, and values through multiple lenses", "chapters": (4, 6)},
+    {"name": "biographical", "description": "Trace the life, work, and impact of a remarkable person or group through defining moments", "chapters": (5, 7)},
+    {"name": "systems", "description": "Map how interconnected parts form a whole, revealing emergent behavior and leverage points", "chapters": (5, 8)},
 ]
 
 CHAPTER_TEMPLATES = {
     "educational_deep_dive": [
-        "What Is {t}? — The Foundation",
-        "How {t} Actually Works",
-        "The Science Behind {t}",
-        "Common Misconceptions About {t}",
-        "Real-World Applications of {t}",
-        "The Future of {t}",
-        "Why {t} Matters to You",
-        "Putting {t} Into Practice",
+        "What Is {t}? — The Foundation", "How {t} Actually Works",
+        "The Science Behind {t}", "Common Misconceptions About {t}",
+        "Real-World Applications of {t}", "The Future of {t}",
+        "Why {t} Matters to You", "Putting {t} Into Practice",
     ],
     "documentary": [
-        "The Origin of {t}",
-        "The Early Days of {t}",
-        "The Turning Point for {t}",
-        "How {t} Changed Everything",
-        "The Modern Era of {t}",
-        "Controversies Around {t}",
-        "Where {t} Is Headed",
-        "The Legacy of {t}",
+        "The Origin of {t}", "The Early Days of {t}",
+        "The Turning Point for {t}", "How {t} Changed Everything",
+        "The Modern Era of {t}", "Controversies Around {t}",
+        "Where {t} Is Headed", "The Legacy of {t}",
     ],
     "case_study": [
-        "Setting the Stage for {t}",
-        "The Key Players in {t}",
-        "The Critical Moment of {t}",
-        "What the Data Says About {t}",
-        "The Aftermath of {t}",
-        "Lessons Learned from {t}",
+        "Setting the Stage for {t}", "The Key Players in {t}",
+        "The Critical Moment of {t}", "What the Data Says About {t}",
+        "The Aftermath of {t}", "Lessons Learned from {t}",
         "How {t} Applies to You",
     ],
     "explainer": [
-        "Why {t} Exists",
-        "The Core Mechanism of {t}",
-        "Breaking Down How {t} Works",
-        "The Components of {t}",
-        "How {t} Interacts With Everything",
-        "Practical Examples of {t}",
+        "Why {t} Exists", "The Core Mechanism of {t}",
+        "Breaking Down How {t} Works", "The Components of {t}",
+        "How {t} Interacts With Everything", "Practical Examples of {t}",
         "Troubleshooting {t}",
     ],
     "analysis": [
-        "The Current State of {t}",
-        "Key Metrics That Define {t}",
-        "Trends Shaping {t}",
-        "The Contrarian View on {t}",
-        "What Experts Predict for {t}",
-        "The Data Behind {t}",
+        "The Current State of {t}", "Key Metrics That Define {t}",
+        "Trends Shaping {t}", "The Contrarian View on {t}",
+        "What Experts Predict for {t}", "The Data Behind {t}",
         "What This Means for the Future",
     ],
     "tutorial": [
-        "What You Will Need for {t}",
-        "Step 1: Preparing for {t}",
-        "Step 2: The Core Process of {t}",
-        "Step 3: Refining Your {t} Approach",
-        "Common Mistakes in {t}",
-        "Advanced {t} Techniques",
+        "What You Will Need for {t}", "Step 1: Preparing for {t}",
+        "Step 2: The Core Process of {t}", "Step 3: Refining Your {t} Approach",
+        "Common Mistakes in {t}", "Advanced {t} Techniques",
         "Next Steps After Mastering {t}",
     ],
     "comparison": [
-        "Introducing the Two Sides of {t}",
-        "How Approach A Handles {t}",
-        "How Approach B Handles {t}",
-        "Head-to-Head: {t} Performance",
-        "Cost-Benefit Analysis of {t}",
-        "Which Approach Wins for {t}",
+        "Introducing the Two Sides of {t}", "How Approach A Handles {t}",
+        "How Approach B Handles {t}", "Head-to-Head: {t} Performance",
+        "Cost-Benefit Analysis of {t}", "Which Approach Wins for {t}",
         "Hybrid Strategies for {t}",
     ],
     "debate": [
-        "The Case for {t}",
-        "The Case Against {t}",
-        "Where Both Sides Agree on {t}",
-        "The Gray Area of {t}",
-        "Evidence That Challenges {t}",
-        "Reconciling the Two Views on {t}",
+        "The Case for {t}", "The Case Against {t}",
+        "Where Both Sides Agree on {t}", "The Gray Area of {t}",
+        "Evidence That Challenges {t}", "Reconciling the Two Views on {t}",
         "Your Verdict on {t}",
+    ],
+    "investigative": [
+        "The Question at the Heart of {t}", "Following the First Clue",
+        "The Evidence Stack", "The Cover-Up or Misconception",
+        "The Breakthrough Discovery", "Connecting All the Dots",
+        "The Full Truth About {t}",
+    ],
+    "philosophical": [
+        "Why {t} Demands Our Attention", "The Classical View on {t}",
+        "The Modern Challenge to {t}", "What the Sciences Say About {t}",
+        "The Practical Wisdom of {t}", "Reconciling Perspectives on {t}",
+        "How to Live with {t}",
+    ],
+    "biographical": [
+        "Before They Were Known", "The Formative Years",
+        "The Defining Challenge", "The Breakthrough Moment",
+        "The Peak of Influence", "The Later Years and Reflection",
+        "The Lasting Legacy",
+    ],
+    "systems": [
+        "Mapping the {t} Landscape", "The Core Components of {t}",
+        "Feedback Loops in {t}", "Emergent Behavior of {t}",
+        "Leverage Points in {t}", "When {t} Systems Break Down",
+        "Designing Better {t} Systems",
     ],
 }
 
@@ -324,7 +326,7 @@ SCENE_PURPOSE_DESC = {
 }
 
 
-def build_long_prompt(topic):
+def build_long_prompt(topic, trending_context=None):
     entropy = int.from_bytes(os.urandom(4)) + time.time_ns()
     rng = random.Random(_seed(topic) + entropy)
 
@@ -391,7 +393,15 @@ def build_long_prompt(topic):
     _ensure_unique_fingerprint(fingerprint)
     meta["fingerprint"] = fingerprint
 
-    prompt = f"""You are a world-class long-form YouTube educational content creator and cinematic director.
+    BO = "You are a world-class long-form YouTube content creator building a trusted educational brand."
+    prompt = f"""{BO} Every script must feel 100% human-written — no AI patterns, no robotic phrasing, no repetitive structures.
+
+BRAND IDENTITY — This channel is building long-term viewer trust. Every video must:
+- Deliver genuine deep understanding, not surface-level facts
+- Sound like a passionate expert explaining to a curious friend
+- Use specific examples, stories, and analogies — never vague generic statements
+- Respect the viewer's intelligence while making complex ideas accessible
+- End with the viewer feeling genuinely smarter, not just entertained
 
 CONTENT ANGLE: {drifted}
 
@@ -433,27 +443,47 @@ RETENTION ARCHITECTURE (MANDATORY):
 6. CONCLUSION: Summarize the transformation. Give a clear single next step. End with a question to drive comments.
 7. CHAPTER TRANSITIONS: Use verbal cues like "Now that we understand X, let's look at Y" for natural chapter boundaries.
 
+HUMAN AUTHENTICITY RULES (MANDATORY — VIOLATION BREAKS THE ILLUSION):
+1. Vary sentence starters aggressively. Never begin two consecutive sentences with the same word. Never begin more than 3 sentences in a chapter with the same part of speech.
+2. Use contractions naturally (don't, can't, won't, isn't, it's, there's, that's, they've).
+3. Occasionally start a sentence with "And", "But", "So", "Or", "Because" — real humans speak this way.
+4. Include one specific concrete example per chapter — a real number, a named person, a specific date, a place, or a study citation.
+5. Use analogies and metaphors to explain abstract concepts. At least one per chapter.
+6. Vary paragraph length. A single short punchy sentence followed by a longer 3-sentence explanation creates natural rhythm.
+7. No formulaic transitions. Instead of "Now let's look at X", try "X tells a completely different story" or "This is where X gets fascinating".
+8. Read every scene aloud. If it sounds like it was written by AI, rewrite it until it sounds like a human expert speaking naturally.
+9. Include one rhetorical question per chapter that makes the viewer pause and think.
+10. Never use the phrases: "delve into", "let's dive in", "in this video we'll explore", "it's worth noting", "in conclusion", "overall", "essentially". These are AI tells.
+
+ANTI-REPETITION RULES:
+- Every scene's keyword must describe a COMPLETELY UNIQUE visual — different subject, camera angle, lighting, color palette, and mood.
+- No two scenes across the entire script should have similar visual keywords.
+- Vary narration structure dramatically between scenes: question→answer, statement→evidence, example→implication, contrast→resolution.
+- The opening hook and the closing scene must use structurally different sentence patterns.
+
 SELF-SCORING (REQUIRED):
 - virality_score (0.0-1.0): How likely is this to be shared/saved/bookmarked? Must exceed 0.65.
 - attention_score (0.0-1.0): How well does it retain attention across the FULL duration? Must exceed 0.65.
-If either is <= 0.65, rewrite the entire script.
+- authenticity_score (0.0-1.0): How much does this sound like a real human expert? Must exceed 0.75.
+If any score is below threshold, rewrite the entire script.
 
 OUTPUT FORMAT:
 Return ONLY valid JSON with EXACTLY these keys:
 {{
-  "title": "SEO-optimised title <= 80 chars, primary keyword near the start",
+  "title": "SEO-optimised title <= 80 chars, primary keyword near the start, no clickbait without delivery",
   "description": "3-5 punchy lines with emojis, then chapter timestamps (0:00 - Hook\\n2:15 - Chapter 1\\n...), then 8-10 relevant #hashtags",
   "tags": ["12", "lowercase", "seo", "tags"],
-  "hook": "8-15 word hook that stops the scroll",
-  "comment": "one question that drives discussion replies",
+  "hook": "8-15 word hook that stops the scroll — a genuine curiosity gap or bold claim",
+  "comment": "specific opinion question that drives thoughtful discussion replies, not generic",
   "virality_score": 0.0,
   "attention_score": 0.0,
+  "authenticity_score": 0.0,
   "chapters": [
     {{
       "title": "Chapter Title Here",
       "timestamp_sec": 0,
       "scenes": [
-        {{"narration": "3-5 sentences that deliver one complete narrative beat. Flowing natural spoken language. 40-80 words.", "keyword": "CINEMATIC VISUAL BRIEF 15-25 words for landscape 16:9 stock footage"}}
+        {{"narration": "3-5 sentences delivering one complete narrative beat in natural spoken language. 40-80 words. Should include one specific detail (number, name, example).", "keyword": "CINEMATIC VISUAL BRIEF 15-25 words for landscape 16:9 stock footage — unique perspective, lighting, and subject"}}
       ]
     }}
   ]
@@ -462,31 +492,48 @@ Return ONLY valid JSON with EXACTLY these keys:
 TIME BUDGET: 8-15 minute YouTube video.
 - Total script: 480-900 seconds spoken.
 - Each scene: 25-45 seconds (3-5 sentences, 40-80 words).
-- Each chapter: 5-10 scenes, ends with a verbal transition to the next chapter.
-- Leave 1-2 seconds of natural pause between scenes.
+- Each chapter: 5-10 scenes, ends with a verbal bridge to the next chapter.
+- Leave natural breathing room between scenes — real pauses, not robotic gaps.
 
-NARRATION RULES:
+NARRATION MASTERY:
 - Match the {voice['name']} voice and {tone} tone exactly.
 - Follow the {arc['name'].replace('_', ' ').title()} narrative arc naturally.
-- Vary sentence TEMPO: short (5-10 words) for emphasis, medium (12-20) for explanation, long (20-35) for immersion.
+- Vary sentence TEMPO: short (5-10 words) for emphasis and punch, medium (12-20) for explanation and flow, long (20-35) for immersion and depth.
 - NEVER start two consecutive sentences with the same word.
-- Use {', '.join(rhetorical)} naturally throughout.
-- Each chapter must end with a verbal bridge to the next chapter.
-- No emojis, hashtags, URLs, or speaker labels in narration.
-- Read every scene aloud. If it does not flow naturally when spoken, rewrite it.
+- Use {', '.join(rhetorical)} naturally — they should feel organic, not forced.
+- Each chapter must end with a reason to watch the next, not a robotic "now let's move on".
+- No emojis, hashtags, URLs, or speaker labels in narration. Pure spoken word.
+- Read every scene aloud. If it does not flow naturally when spoken aloud by a human, rewrite it completely.
 
-CINEMATIC KEYWORD RULES:
-Each "keyword" is a visual brief for stock footage search (landscape 16:9 orientation).
-- 15-25 words describing ONE continuous frame.
-- Include: primary subject, camera perspective (wide, medium, close-up, aerial, POV, tracking), lighting quality, color atmosphere.
-- Match the scene's energy level for mood.
-- Suitable for Pexels/Pixabay keyword search.
-- Every keyword must be substantively different from all others.
+CINEMATIC KEYWORD ARCHITECTURE:
+Each "keyword" is a visual brief for stock footage search (landscape 16:9). Rules:
+- 15-25 words describing ONE continuous frame with a specific subject.
+- Include: primary subject, camera perspective (wide, medium, close-up, aerial, POV, tracking, dolly, crane, macro, Dutch angle), lighting quality (golden hour, dramatic shadows, soft diffused, neon, rim light, volumetric), color atmosphere.
+- Match scene's energy level for mood.
+- Every keyword must have a COMPLETELY UNIQUE subject + perspective + lighting combo from all others.
+- NEVER repeat a visual concept across scenes. If one scene uses "close up of hands typing", the next must use something completely different like "wide aerial cityscape at dusk".
 
-Valid JSON only. No markdown fences. No explanatory text.
+Valid JSON only. No markdown fences. No explanatory text outside JSON. Never include "Here is the JSON" or similar.
 
 TOPIC: "{topic}"
 """
+    if trending_context:
+        tc = trending_context
+        ctx_lines = []
+        if tc.get("top_trending_topic"):
+            ctx_lines.append(f"TRENDING RIGHT NOW: {tc['top_trending_topic']}")
+        if tc.get("reason"):
+            ctx_lines.append(f"WHY IT MATTERS: {tc['reason']}")
+        if tc.get("briefings"):
+            for b in tc["briefings"]:
+                cat = b.get("category", "general")
+                hl = (b.get("headlines") or [])
+                if hl:
+                    ctx_lines.append(f"{cat.upper()}: {' | '.join(hl[:3])}")
+        if ctx_lines:
+            prompt += "\n\nCURRENT CONTEXT (integrate naturally into the narrative):\n" + "\n".join(ctx_lines)
+            prompt += "\n\nReference these current events where relevant to make the content timely and grounded in real news."
+
     return prompt, meta
 
 
@@ -598,5 +645,6 @@ def build_offline_long_script(topic, meta=None):
         "comment": "What did you think? Share your perspective below.",
         "virality_score": round(rng.uniform(0.60, 0.80), 2),
         "attention_score": round(rng.uniform(0.65, 0.85), 2),
+        "authenticity_score": round(rng.uniform(0.70, 0.85), 2),
         "chapters": chapters_json,
     }
