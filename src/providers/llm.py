@@ -51,7 +51,14 @@ GROQ_MODELS = [
     "qwen-2.5-32b",
 ]
 
-GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash"]
+GEMINI_MODELS = [
+    "gemini-3.5-flash",
+    "gemini-3.1-flash-lite",
+    "gemini-3-flash",
+    "gemini-2.5-flash",
+    "gemini-2.5-pro",
+    "gemini-2.0-flash",
+]
 
 # Temperature range -- randomised per video so outputs vary even from the
 # same provider and topic.
@@ -99,14 +106,14 @@ def _validate(data, topic):
     if len(scenes) < 3:
         raise ValueError(f"only {len(scenes)} usable scenes")
     return {
-        "title": str(data.get("title") or topic)[:100],
+        "title": str(data.get("title") or topic)[:120],
         "description": str(data.get("description") or topic),
         "tags": [str(t)[:60] for t in (data.get("tags") or [])][:15],
-        "hook": str(data.get("hook") or "Watch till the end")[:60],
-        "comment": str(data.get("comment") or "What did you think? Drop your thoughts below!")[:200],
+        "hook": str(data.get("hook") or "Watch till the end")[:100],
+        "comment": str(data.get("comment") or "What did you think? Drop your thoughts below!")[:300],
         "virality_score": max(0.0, min(1.0, float(data.get("virality_score", 0)))),
         "attention_score": max(0.0, min(1.0, float(data.get("attention_score", 0)))),
-        "scenes": scenes[:8],
+        "scenes": scenes[:24],
     }
 
 
@@ -121,10 +128,10 @@ def _groq(topic, prompt, temperature):
                 json={
                     "model": model,
                     "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 1400,
+                    "max_tokens": 4096,
                     "temperature": temperature,
                 },
-                timeout=120,
+                timeout=180,
             )
             r.raise_for_status()
             content = r.json()["choices"][0]["message"]["content"]
@@ -147,9 +154,10 @@ def _gemini(topic, prompt, temperature):
                 json={
                     "contents": [{"parts": [{"text": prompt}]}],
                     "generationConfig": {"responseMimeType": "application/json",
-                                         "temperature": temperature},
+                                         "temperature": temperature,
+                                         "maxOutputTokens": 4096},
                 },
-                timeout=120,
+                timeout=180,
             )
             r.raise_for_status()
             text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
@@ -173,10 +181,10 @@ def _openrouter(topic, prompt, temperature):
                 json={
                     "model": model,
                     "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 1400,
+                    "max_tokens": 4096,
                     "temperature": temperature,
                 },
-                timeout=120,
+                timeout=180,
             )
             r.raise_for_status()
             body = r.json()
@@ -201,10 +209,10 @@ def _huggingface(topic, prompt, temperature):
                 json={
                     "model": model,
                     "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 1400,
+                    "max_tokens": 4096,
                     "temperature": temperature,
                 },
-                timeout=120,
+                timeout=180,
             )
             r.raise_for_status()
             content = r.json()["choices"][0]["message"]["content"]
@@ -228,7 +236,7 @@ def _local(topic, prompt, temperature):
     )
     out = llm.create_chat_completion(
         messages=[{"role": "user", "content": prompt}],
-        max_tokens=1400,
+        max_tokens=4096,
         temperature=temperature,
     )
     content = out["choices"][0]["message"]["content"]
@@ -259,7 +267,7 @@ def generate_plan(topic, extra_context=None):
     if os.environ.get("GROQ_API_KEY"):
         chain.append(("groq-llama3.3-70b", lambda: _groq(topic, dyn_prompt, temp)))
     if os.environ.get("GEMINI_API_KEY"):
-        chain.append(("gemini-flash", lambda: _gemini(topic, dyn_prompt, temp)))
+        chain.append(("gemini", lambda: _gemini(topic, dyn_prompt, temp)))
     if os.environ.get("OPENROUTER_API_KEY"):
         chain.append(("openrouter-free", lambda: _openrouter(topic, dyn_prompt, temp)))
     if os.environ.get("HF_TOKEN"):

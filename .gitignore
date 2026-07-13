@@ -1,4 +1,5 @@
 output/
+output_long/
 models/
 *.mp3
 *.mp4

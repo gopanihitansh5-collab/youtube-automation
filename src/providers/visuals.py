@@ -194,7 +194,7 @@ def _download(url, out_path, timeout=180):
 _PEXELS_PER_PAGE = 80
 
 
-def _pexels(keyword, scene_index, out_path):
+def _pexels(keyword, scene_index, out_path, orientation="portrait"):
     key = os.environ["PEXELS_API_KEY"]
     used = _load_used()
 
@@ -223,7 +223,7 @@ def _pexels(keyword, scene_index, out_path):
                 params={
                     "query": seeded,
                     "per_page": _PEXELS_PER_PAGE,
-                    "orientation": "portrait",
+                    "orientation": orientation,
                 },
                 timeout=30,
             )
@@ -374,18 +374,19 @@ def _pixabay(keyword, scene_index, out_path):
 
 
 # ----------------------------------------------------------------- public
-def get_visual(keyword, out_base, scene_index=0):
+def get_visual(keyword, out_base, scene_index=0, orientation="portrait"):
     """Return (path, kind, provider_name). Never raises -- gradient always works.
 
     Walks the provider chain in order, caching failures per keyword so we
     don't retry a provider for the same keyword within a single run.
+    orientation: "portrait" (9:16 Shorts) or "landscape" (16:9 long-form).
     """
     chain = []
 
     if os.environ.get("PEXELS_API_KEY") and not _has_failed("pexels", keyword):
         chain.append((
             "pexels",
-            lambda kw, p: _pexels(kw, scene_index, p),
+            lambda kw, p, o=orientation: _pexels(kw, scene_index, p, orientation=o),
             out_base + ".mp4",
             "video",
         ))
