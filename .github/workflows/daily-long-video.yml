@@ -15,7 +15,7 @@ permissions:
 jobs:
   build-and-post:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -41,6 +41,15 @@ jobs:
         with:
           path: models
           key: local-models-v5
+      - name: Check for cached script (resumption support)
+        continue-on-error: true
+        run: |
+          if [ -f output_long/script_cache.json ]; then
+            echo "Found cached script — pipeline will resume from last checkpoint"
+            cat output_long/run_state.json 2>/dev/null || echo "No run state"
+          else
+            echo "No cached script — full pipeline run"
+          fi
       - name: Generate long-form video
         env:
           SHEET_ID: ${{ secrets.SHEET_ID }}

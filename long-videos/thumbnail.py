@@ -27,8 +27,8 @@ FONT_CANDIDATES = [
 ]
 
 _FONT_URLS = {
-    "DejaVuSans-Bold.ttf": "https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/DejaVuSans-Bold.ttf",
-    "DejaVuSans.ttf": "https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/DejaVuSans.ttf",
+    "DejaVuSans-Bold.ttf": "https://github.com/dejavu-fonts/dejavu-fonts/raw/release-2_37/ttf/DejaVuSans-Bold.ttf",
+    "DejaVuSans.ttf": "https://github.com/dejavu-fonts/dejavu-fonts/raw/release-2_37/ttf/DejaVuSans.ttf",
 }
 
 

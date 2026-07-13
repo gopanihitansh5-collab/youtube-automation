@@ -47,6 +47,9 @@ from web_search_tool import (search_web, get_daily_briefing, get_trending_news,
 from topic_context import (TopicContext, parse_topic_context, store_context,
                            build_script_context_block, build_thumbnail_context,
                            build_transcript_context, integrate_context_into_pipeline)
+from script_cache import (cache_script, load_cached_script, clear_cache,
+                          save_run_state, get_run_state, is_step_completed,
+                          clear_run_state, estimate_tokens, suggest_model)
 
 # Module-level cache for trending context (populated by _get_topic, consumed by _generate_long_plan)
 _TRENDING_CTX = {"region_data": [], "best_video_topic": None, "global_pulse": ""}
@@ -480,7 +483,7 @@ GROQ_MODELS = [
 GEMINI_MODELS = [
     "gemini-3.5-flash",
     "gemini-3.1-flash-lite",
-    "gemini-3-flash",
+    "gemini-3-flash-preview",
     "gemini-2.5-flash",
     "gemini-2.5-pro",
     "gemini-2.0-flash",
@@ -516,8 +519,8 @@ def _validate_long(data, topic):
     if len(valid_chapters) < 2:
         raise ValueError(f"only {len(valid_chapters)} valid chapters")
     total_scenes = sum(len(ch["scenes"]) for ch in valid_chapters)
-    if total_scenes < 8:
-        raise ValueError(f"only {total_scenes} total scenes across chapters")
+    if total_scenes < 15:
+        raise ValueError(f"only {total_scenes} total scenes across chapters (need ≥15 for 5+ min)")
     return {
         "title": str(data.get("title") or topic)[:120],
         "description": str(data.get("description") or ""),
@@ -548,18 +551,21 @@ def _groq_long(topic, prompt, temperature):
     if not key:
         raise RuntimeError("GROQ_API_KEY not set")
     last_err = None
-    for model in GROQ_MODELS:
+    best_model = suggest_model(prompt, GROQ_MODELS, provider="groq", reserve_output=8192)
+    models_to_try = [best_model] if best_model else GROQ_MODELS
+    for model in models_to_try:
         try:
+            print(f"    Groq trying {model} (prompt ~{estimate_tokens(prompt)}t)", flush=True)
             r = requests.post(
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {key}"},
                 json={
                     "model": model,
                     "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 8192,
+                    "max_tokens": 12288,
                     "temperature": temperature,
                 },
-                timeout=180,
+                timeout=300,
             )
             r.raise_for_status()
             content = r.json()["choices"][0]["message"]["content"]
@@ -576,14 +582,17 @@ def _gemini_search_long(topic, prompt, temperature):
     if not key:
         raise RuntimeError("GEMINI_API_KEY not set")
     last_err = None
-    for model in GEMINI_MODELS:
+    best_model = suggest_model(prompt, GEMINI_MODELS, provider="gemini", reserve_output=12288)
+    models_to_try = [best_model] if best_model else GEMINI_MODELS
+    for model in models_to_try:
         try:
+            print(f"    Gemini trying {model} (prompt ~{estimate_tokens(prompt)}t)", flush=True)
             payload = {
                 "contents": [{"parts": [{"text": prompt}]}],
                 "generationConfig": {
                     "responseMimeType": "application/json",
                     "temperature": temperature,
-                    "maxOutputTokens": 8192,
+                    "maxOutputTokens": 12288,
                 },
                 "tools": [{"googleSearchRetrieval": {}}],
             }
@@ -591,15 +600,31 @@ def _gemini_search_long(topic, prompt, temperature):
                 f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
                 headers={"x-goog-api-key": key},
                 json=payload,
-                timeout=180,
+                timeout=300,
             )
             r.raise_for_status()
-            text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
-            grounding = r.json().get("candidates", [{}])[0].get("groundingMetadata")
+            body = r.json()
+            text = body["candidates"][0]["content"]["parts"][0]["text"]
+            grounding = body.get("candidates", [{}])[0].get("groundingMetadata")
             if grounding:
                 sources = grounding.get("groundingChunks", [])
                 print(f"      search grounded with {len(sources)} sources", flush=True)
+                search_suggestions = grounding.get("groundingSupports", [])
+                if search_suggestions:
+                    print(f"      grounding supports: {len(search_suggestions)} segments", flush=True)
             return _validate_long(_extract_json(text), topic)
+        except requests.exceptions.Timeout:
+            last_err = "timeout"
+            print(f"    Gemini {model} timed out after 300s — trying next")
+        except requests.exceptions.HTTPError as e:
+            status = e.response.status_code if e.response else 0
+            if status == 429:
+                print(f"    Gemini {model} rate limited (429) — trying next")
+            elif status == 404:
+                print(f"    Gemini {model} not found (404) — trying next")
+            else:
+                print(f"    Gemini {model} HTTP {status}: {e}")
+            last_err = e
         except Exception as e:
             last_err = e
             print(f"    Gemini search model {model} failed: {e}")
@@ -611,18 +636,21 @@ def _openrouter_long(topic, prompt, temperature):
     if not token:
         raise RuntimeError("OPENROUTER_API_KEY not set")
     last_err = None
-    for model in OPENROUTER_MODELS:
+    best_model = suggest_model(prompt, OPENROUTER_MODELS, provider="openrouter", reserve_output=8192)
+    models_to_try = [best_model] if best_model else OPENROUTER_MODELS
+    for model in models_to_try:
         try:
+            print(f"    OpenRouter trying {model} (prompt ~{estimate_tokens(prompt)}t)", flush=True)
             r = requests.post(
                 "https://openrouter.ai/api/v1/chat/completions",
                 headers={"Authorization": f"Bearer {token}"},
                 json={
                     "model": model,
                     "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 8192,
+                    "max_tokens": 12288,
                     "temperature": temperature,
                 },
-                timeout=180,
+                timeout=300,
             )
             r.raise_for_status()
             body = r.json()
@@ -641,18 +669,21 @@ def _huggingface_long(topic, prompt, temperature):
     if not token:
         raise RuntimeError("HF_TOKEN not set")
     last_err = None
-    for model in HF_MODELS:
+    best_model = suggest_model(prompt, HF_MODELS, provider="huggingface", reserve_output=8192)
+    models_to_try = [best_model] if best_model else HF_MODELS
+    for model in models_to_try:
         try:
+            print(f"    HF trying {model} (prompt ~{estimate_tokens(prompt)}t)", flush=True)
             r = requests.post(
                 "https://router.huggingface.co/v1/chat/completions",
                 headers={"Authorization": f"Bearer {token}"},
                 json={
                     "model": model,
                     "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 8192,
+                    "max_tokens": 12288,
                     "temperature": temperature,
                 },
-                timeout=180,
+                timeout=300,
             )
             r.raise_for_status()
             content = r.json()["choices"][0]["message"]["content"]
@@ -667,6 +698,22 @@ def _generate_long_plan(topic, topic_ctx=None):
     import random
     if topic_ctx is None:
         topic_ctx = _TOPIC_CTX
+
+    # Check if we already have a cached script
+    cached = load_cached_script()
+    if cached and cached.get("topic") == topic:
+        print(f"  using cached script from {cached.get('cached_at','')}", flush=True)
+        plan = cached["plan"]
+        import jsonschema
+        try:
+            validated = _validate_long(plan, topic)
+            print(f"  cached plan valid: {len(validated['chapters'])} ch, "
+                  f"{sum(len(c['scenes']) for c in validated['chapters'])} scenes",
+                  flush=True)
+            return validated, cached.get("llm_used", "cached"), meta
+        except Exception as e:
+            print(f"  cached plan invalid ({e}) — regenerating", flush=True)
+            clear_cache()
 
     trending_context = None
     if topic_ctx:
@@ -701,10 +748,14 @@ def _generate_long_plan(topic, topic_ctx=None):
             print(f"  chapters: {len(plan['chapters'])} | "
                   f"total scenes: {sum(len(c['scenes']) for c in plan['chapters'])}",
                   flush=True)
+            cache_script(plan, topic, name)
+            save_run_state("script_generated", {"topic": topic, "llm": name})
             return plan, name, meta
         except Exception as e:
             print(f"  script provider {name} unavailable: {e}", flush=True)
     plan = build_offline_long_script(topic, meta)
+    cache_script(plan, topic, "offline-builder")
+    save_run_state("script_generated", {"topic": topic, "llm": "offline-builder"})
     return plan, "offline-builder", meta
 
 
@@ -737,6 +788,7 @@ def main():
     report["providers"]["topic_source"] = item["source"]
     print(f"Topic [{item['source']}]: {topic!r} | voice={voice_name} | privacy={privacy}",
           flush=True)
+    save_run_state("topic_selected", {"topic": topic, "source": item["source"]})
 
     plan, llm_used, meta = _generate_long_plan(topic, topic_ctx=_TOPIC_CTX)
     report["providers"]["script"] = llm_used
@@ -760,8 +812,8 @@ def main():
             all_scenes.append(sc)
 
     from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeout
-    _VOICE_TIMEOUT = 120
-    _VISUAL_TIMEOUT = 120
+    _VOICE_TIMEOUT = 300
+    _VISUAL_TIMEOUT = 300
 
     def _voice_job(i_sc):
         i, sc = i_sc
@@ -848,6 +900,7 @@ def main():
     )
     dur = probe_duration(final) if final and os.path.exists(final) else 0
     print(f"\nRendered: {final} ({dur:.1f}s)", flush=True)
+    save_run_state("video_rendered", {"duration_sec": dur})
 
     if item.get("source") != "google-sheet":
         mark_done(topic, "rendered")
