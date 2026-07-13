@@ -73,11 +73,7 @@ def _get_topic():
     return {"row_idx": None, "source": "built-in", **pick}
 from longform_prompt import build_long_prompt, build_offline_long_script
 from editor_long import build as editor_build, probe_duration
-
-try:
-    from src import thumbnail as thumb_mod
-except ImportError:
-    thumb_mod = None
+from thumbnail import make as make_thumbnail
 
 GROQ_MODELS = [
     "llama-3.3-70b-versatile",
@@ -305,59 +301,7 @@ def _generate_long_plan(topic):
     return plan, "offline-builder", meta
 
 
-def _imagen_thumbnail(hook, video_path, out_path):
-    """Generate a custom thumbnail using Imagen 4 via Gemini API."""
-    key = os.environ.get("GEMINI_API_KEY")
-    if not key:
-        print("  GEMINI_API_KEY not set — skipping Imagen thumbnail", flush=True)
-        return None
-    try:
-        prompt_text = (
-            f"YouTube video thumbnail for: '{hook}'. "
-            f"Modern, clickable, high contrast, text overlay area at top, "
-            f"cinematic lighting, 16:9 landscape, professional, bold colors."
-        )
-        r = requests.post(
-            "https://generativelanguage.googleapis.com/v1beta/models/"
-            "imagen-4-generate:predict",
-            headers={"x-goog-api-key": key, "Content-Type": "application/json"},
-            json={
-                "instances": [{"prompt": prompt_text}],
-                "parameters": {
-                    "sampleCount": 1,
-                    "aspectRatio": "16:9",
-                },
-            },
-            timeout=60,
-        )
-        r.raise_for_status()
-        data = r.json()
-        img_data = data.get("predictions", [{}])[0].get("bytesBase64Encoded")
-        if img_data:
-            import base64
-            with open(out_path, "wb") as f:
-                f.write(base64.b64decode(img_data))
-            print(f"  Imagen 4 thumbnail: {out_path}", flush=True)
-            return out_path
-        print("  Imagen 4 returned no image data", flush=True)
-    except Exception as e:
-        print(f"  Imagen 4 thumbnail failed: {e}", flush=True)
 
-    if video_path and os.path.exists(video_path):
-        try:
-            _run_ff(["ffmpeg", "-y", "-i", video_path, "-ss", "00:00:02",
-                     "-vframes", "1", "-s", "1280x720", out_path])
-            if os.path.exists(out_path):
-                print(f"  fallback thumbnail from video: {out_path}", flush=True)
-                return out_path
-        except Exception as e2:
-            print(f"  fallback thumbnail failed: {e2}", flush=True)
-    return None
-
-
-def _run_ff(cmd, timeout=120):
-    import subprocess
-    subprocess.run(cmd, check=True, timeout=timeout)
 
 
 def _chapter_timestamps(chapters):
@@ -497,14 +441,16 @@ def main():
     dur = probe_duration(final) if final and os.path.exists(final) else 0
     print(f"\nRendered: {final} ({dur:.1f}s)", flush=True)
 
-    thumb_path = "output_long/thumbnail.png"
+    thumb_path = "output_long/thumbnail.jpg"
     try:
-        if thumb_mod:
-            thumb_mod.make(hook, final, thumb_path)
-            print(f"Thumbnail (local): {thumb_path}", flush=True)
-        else:
-            print("  generating Imagen 4 thumbnail ...", flush=True)
-            _imagen_thumbnail(hook, final, thumb_path)
+        print("  generating enhanced thumbnail ...", flush=True)
+        make_thumbnail(
+            title=plan.get("title", ""),
+            hook=hook,
+            video_path=final,
+            out_path=thumb_path,
+            style="bold_split",
+        )
     except Exception as e:
         print(f"  thumbnail generation failed: {e}", flush=True)
 
