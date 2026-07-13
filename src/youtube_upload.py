@@ -8,6 +8,7 @@ Comment pinning uses a SEPARATE service instance (with force-ssl scope) so it
 gracefully degrades when the token only has youtube.upload scope.
 """
 import os
+import requests as req_lib
 
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
@@ -86,6 +87,7 @@ def _pin_comment(video_id, text=None):
         svc = _service(extra_scopes=[
             "https://www.googleapis.com/auth/youtube.force-ssl"])
         if not svc:
+            print("  comment pinning: YouTube service not available")
             return
         resp = svc.commentThreads().insert(
             part="snippet",
@@ -98,26 +100,51 @@ def _pin_comment(video_id, text=None):
                 }
             },
         ).execute()
-        cid = resp["id"]
+        cid = resp["snippet"]["topLevelComment"]["id"]
         print(f"  comment posted: {text[:50]}...", flush=True)
         try:
-            svc.commentThreads().update(
+            svc.comments().update(
                 part="snippet",
                 body={
                     "id": cid,
                     "snippet": {
                         "videoId": video_id,
-                        "topLevelComment": {"snippet": {"textOriginal": text}},
+                        "textOriginal": text,
                         "isPinned": True,
                     }
                 },
             ).execute()
-            print(f"  comment pinned", flush=True)
+            print(f"  comment pinned on https://youtu.be/{video_id}", flush=True)
         except AttributeError:
-            print(f"  comment pinning not supported by this API version — comment posted unpinned", flush=True)
+            try:
+                creds = svc._http.credentials
+                creds.refresh(req_lib.Request())
+                token = creds.token
+                api = "https://youtube.googleapis.com/youtube/v3/comments?part=snippet"
+                r = req_lib.patch(
+                    api,
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "id": cid,
+                        "snippet": {
+                            "videoId": video_id,
+                            "textOriginal": text,
+                            "isPinned": True,
+                        }
+                    },
+                    timeout=15,
+                )
+                r.raise_for_status()
+                print(f"  comment pinned on https://youtu.be/{video_id}", flush=True)
+            except Exception as e2:
+                print(f"  comment pinning: comment posted but pin failed: {e2}", flush=True)
     except Exception as e:
         err = str(e)
         if any(k in err.lower() for k in ("insufficient", "scope", "403", "invalid_scope")):
-            print(f"  comment pinning: token lacks force-ssl scope (re-auth needed)")
+            print(f"  comment pinning: token lacks force-ssl scope — run "
+                  f"scripts/get_youtube_token.py to re-auth with updated scopes")
         else:
             print(f"  comment pinning failed: {err}", flush=True)
