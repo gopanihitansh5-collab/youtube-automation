@@ -103,6 +103,9 @@ def _validate(data, topic):
         "description": str(data.get("description") or topic),
         "tags": [str(t)[:60] for t in (data.get("tags") or [])][:15],
         "hook": str(data.get("hook") or "Watch till the end")[:60],
+        "comment": str(data.get("comment") or "What did you think? Drop your thoughts below!")[:200],
+        "virality_score": max(0.0, min(1.0, float(data.get("virality_score", 0)))),
+        "attention_score": max(0.0, min(1.0, float(data.get("attention_score", 0)))),
         "scenes": scenes[:8],
     }
 

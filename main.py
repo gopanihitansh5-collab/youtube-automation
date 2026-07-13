@@ -118,8 +118,12 @@ def main():
     report["providers"]["script"] = llm_used
     scenes = plan["scenes"]
     hook = plan["hook"]
-    print(f"Title: {plan['title']}\nHook : {hook}\nScenes: {len(scenes)}",
-          flush=True)
+    v = plan.get("virality_score", 0)
+    a = plan.get("attention_score", 0)
+    print(f"Title: {plan['title']}\nHook : {hook}\nScenes: {len(scenes)}"
+          f"\nViral: {v:.2f} | Attention: {a:.2f}", flush=True)
+    if v < 0.6 or a < 0.6:
+        print(f"  WARNING: scores below 0.6 threshold — consider regenerating", flush=True)
     sheets.write_script_metadata(item, plan)
 
     # ---- 3) prepend hook-intro scene --------------------------------------
@@ -244,7 +248,7 @@ def main():
             from src import youtube_upload
             url = youtube_upload.upload(final, plan["title"],
                                         plan["description"], plan["tags"], privacy,
-                                        hook=plan.get("hook"))
+                                        hook=plan.get("hook"), comment=plan.get("comment"))
             report["youtube_url"] = url
             with open("output/metadata.json", "w", encoding="utf-8") as f:
                 json.dump(report, f, indent=2, ensure_ascii=False)

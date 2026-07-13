@@ -38,7 +38,7 @@ def _service(extra_scopes=None):
     return build("youtube", "v3", credentials=creds)
 
 
-def upload(path, title, description, tags, privacy="public", hook=None):
+def upload(path, title, description, tags, privacy="public", hook=None, comment=None):
     youtube = _service()
     if not youtube:
         raise RuntimeError("YouTube secrets not configured")
@@ -72,8 +72,7 @@ def upload(path, title, description, tags, privacy="public", hook=None):
 
     video_id = response["id"]
 
-    comment = hook or f"What did you think? Drop your thoughts below!"
-    _pin_comment(video_id, text=comment)
+    _pin_comment(video_id, text=comment or hook or "What did you think? Drop your thoughts below!")
 
     return f"https://youtu.be/{video_id}"
 
