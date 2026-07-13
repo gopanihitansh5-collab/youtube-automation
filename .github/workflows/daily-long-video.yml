@@ -1,0 +1,105 @@
+name: Daily Long-Form Video
+
+# 1 long-form video per day. Runs at 12:00 UTC (17:30 IST).
+# "Run workflow" in the Actions tab triggers it manually.
+on:
+  schedule:
+    - cron: "0 12 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: daily-long-video
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install ffmpeg, fonts, espeak (offline voice fallback)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fonts-dejavu-core espeak-ng
+          fc-cache -fv
+
+      - name: Install Python deps
+        run: pip install -r requirements.txt
+
+      - name: Install llama-cpp-python (local LLM engine)
+        continue-on-error: true
+        run: |
+          pip install llama-cpp-python \
+            --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu \
+            || pip install llama-cpp-python
+
+      - name: Restore used-visuals cache
+        continue-on-error: true
+        run: python src/restore_cache.py
+
+      - name: Cache local models
+        uses: actions/cache@v4
+        with:
+          path: models
+          key: local-models-v5
+
+      - name: Fetch LIVE regional trends (web search)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          python -c "
+import os, sys
+sys.path.insert(0, '.')
+os.environ['GEMINI_API_KEY'] = os.environ.get('GEMINI_API_KEY', '')
+sys.path.insert(0, 'long-videos')
+from web_search_tool import get_daily_briefing
+print('Pre-fetching regional trends...')
+try:
+    result = get_daily_briefing()
+    print(f'Status: {result.get(\"status\")} | Regions: {len(result.get(\"regions\", []))}')
+except Exception as e:
+    print(f'Pre-fetch skipped: {e}')
+"
+
+      - name: Generate long-form video
+        env:
+          SHEET_ID: ${{ secrets.SHEET_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          LOCAL_LLM: "1"
+          LOCAL_LLM_REPO: Qwen/Qwen2.5-3B-Instruct-GGUF
+          LOCAL_LLM_FILE: qwen2.5-3b-instruct-q4_k_m.gguf
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+        run: python long-videos/main_long.py
+
+      - name: Upload long-form video artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: long-video-output
+          path: |
+            output_long/final.mp4
+            output_long/metadata.json
+            output_long/thumbnail.jpg
+            output_long/topic_context.json
+          if-no-files-found: warn
+          retention-days: 14
