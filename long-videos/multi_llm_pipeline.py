@@ -15,6 +15,11 @@ import requests
 from script_cache import estimate_tokens, suggest_model
 
 
+def _safe_format(template, **kwargs):
+    escaped = {k: str(v).replace("{", "{{").replace("}", "}}") for k, v in kwargs.items()}
+    return template.format(**escaped)
+
+
 def _extract_json(text):
     text = re.sub(r"^```(?:json)?|```$", "", text.strip(), flags=re.MULTILINE).strip()
     start = text.find("{")
@@ -207,7 +212,7 @@ def stage1_write_script(topic, trending_context=None):
     ctx = ""
     if trending_context and trending_context.get("context_block"):
         ctx = "\nCURRENT CONTEXT:\n" + trending_context["context_block"]
-    prompt = STAGE1_PROMPT.format(topic=topic, trending_context=ctx)
+    prompt = _safe_format(STAGE1_PROMPT, topic=topic, trending_context=ctx)
     print("  [Stage 1/5] Script writer (Groq → OpenRouter)...", flush=True)
     text, model = _call_free_llm(prompt, temperature=0.75, max_tokens=16384)
     data = _extract_json(text) or {}
@@ -255,7 +260,7 @@ Rules:
 def stage2_breakdown_scenes(chapters_data):
     """Groq → OpenRouter free: chapters → scenes."""
     ch_json = json.dumps(chapters_data, indent=2)
-    prompt = STAGE2_PROMPT.format(chapters_json=ch_json)
+    prompt = _safe_format(STAGE2_PROMPT, chapters_json=ch_json)
     print(f"  [Stage 2/5] Scene breakdown (Groq → OpenRouter)...", flush=True)
     text, model = _call_free_llm(prompt, temperature=0.6, max_tokens=16384)
     data = _extract_json(text) or {}
@@ -300,7 +305,7 @@ def stage3_enhance_scenes(chapters):
         return chapters, "none"
 
     sc_json = json.dumps(all_scenes, indent=2)
-    prompt = STAGE3_PROMPT.format(scenes_json=sc_json)
+    prompt = _safe_format(STAGE3_PROMPT, scenes_json=sc_json)
     print(f"  [Stage 3/5] Scene enhancer (Groq → OpenRouter)...", flush=True)
 
     text, model = _call_free_llm(prompt, temperature=0.5, max_tokens=16384)
@@ -352,7 +357,7 @@ def stage4_hook_retention(title, chapters, key_points):
     ch_summary = "; ".join(f"{c.get('title','?')} ({len(c.get('scenes',[]))}s)" for c in chapters)
     kp_str = "; ".join(key_points[:6]) if key_points else ""
 
-    prompt = STAGE4_PROMPT.format(title=title, chapters_summary=ch_summary, key_points=kp_str)
+    prompt = _safe_format(STAGE4_PROMPT, title=title, chapters_summary=ch_summary, key_points=kp_str)
     print("  [Stage 4/5] Hook & retention (Groq → OpenRouter)...", flush=True)
     text, model = _call_free_llm(prompt, temperature=0.7, max_tokens=4096)
     data = _extract_json(text) or {}
@@ -407,7 +412,7 @@ Rules:
 def stage5_final_review(plan_dict):
     """Gemini search-grounded: fact-check, restructure, polish."""
     plan_json = json.dumps(plan_dict, indent=2, default=str)
-    prompt = STAGE5_PROMPT.format(plan_json=plan_json[:8000])  # truncate if huge
+    prompt = _safe_format(STAGE5_PROMPT, plan_json=plan_json[:8000])  # truncate if huge
     print("  [Stage 5/5] Final review & polish (Gemini search-grounded)...", flush=True)
     try:
         text, model = _call_gemini_review(prompt, temperature=0.25, max_tokens=16384)
@@ -515,16 +520,16 @@ def run_full_pipeline(topic, trending_context=None):
         if not vis_check.get("passed", True):
             print(f"  Visual feasibility flagged: {len(vis_check.get('hard_to_find',[]))} hard scenes",
                   flush=True)
-            for idx in vis_check.get("hard_to_find", [])[:3]:
-                # Replace hard-to-find keywords with generic ones
-                for ci, c in enumerate(chapters):
-                    for si in range(len(c.get("scenes", []))):
-                        if idx == 0:
-                            chapters[ci]["scenes"][si]["keyword"] = (
-                                "Stock footage b-roll cinematic establishing shot "
-                                "wide angle natural lighting professional production"
-                            )
-                        idx -= 1
+            hard_indices = set(vis_check.get("hard_to_find", [])[:3])
+            flat_idx = 0
+            for ci, c in enumerate(chapters):
+                for si in range(len(c.get("scenes", []))):
+                    if flat_idx in hard_indices:
+                        chapters[ci]["scenes"][si]["keyword"] = (
+                            "Stock footage b-roll cinematic establishing shot "
+                            "wide angle natural lighting professional production"
+                        )
+                    flat_idx += 1
     except Exception as e:
         print(f"  Visual review error: {e}", flush=True)
 

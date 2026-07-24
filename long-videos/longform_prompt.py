@@ -13,15 +13,20 @@ from pathlib import Path
 
 _MAX_MEMORY = 200
 
-_MEMORY_FILES = {
-    "combo": Path("output/.prompt_history.json"),
-    "hooks": Path("output/.used_hooks.json"),
-    "fingerprints": Path("output/.fingerprints.json"),
-}
+_OUTPUT_DIR = os.environ.get("LONGFORM_OUTPUT_DIR", "output_long")
 
 
-def _load_memory(key):
-    path = _MEMORY_FILES[key]
+def _memory_paths(output_dir=None):
+    d = output_dir or _OUTPUT_DIR
+    return {
+        "combo": Path(f"{d}/.prompt_history.json"),
+        "hooks": Path(f"{d}/.used_hooks.json"),
+        "fingerprints": Path(f"{d}/.fingerprints.json"),
+    }
+
+
+def _load_memory(key, output_dir=None):
+    path = _memory_paths(output_dir)[key]
     if path.exists():
         try:
             data = json.loads(path.read_text())
@@ -32,9 +37,9 @@ def _load_memory(key):
     return []
 
 
-def _save_memory(key, items):
-    path = _MEMORY_FILES[key]
-    hist = _load_memory(key)
+def _save_memory(key, items, output_dir=None):
+    path = _memory_paths(output_dir)[key]
+    hist = _load_memory(key, output_dir=output_dir)
     hist.extend(items if isinstance(items, list) else [items])
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(hist[-_MAX_MEMORY:]))
