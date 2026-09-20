@@ -110,19 +110,16 @@ def _chapter_title_card(title, chapter_num, dur, out, index=0):
     safe_title = title.replace("'", "\\'").replace(":", "\\:")
 
     animate_zoom = f"1+0.015*sin(2*PI*on/{frames})+0.01*on/{frames}"
-    text_fade = f"'if(lt(t,0.5),0,if(lt(t,1.5),(t-0.5)/1,1))'"
-    subtitle_fade = f"'if(lt(t,1.0),0,if(lt(t,2.0),(t-1.0)/1,1))'"
-
     vf = (
         f"gradients=s={W}x{H}:c0={c0}:c1={c1}:c2={c2}:c3={c3}:"
         f"speed=0.008:d={dur:.3f}:r={FPS}[bg];"
         f"[bg]drawtext=fontfile='{_font_arg(font)}':text='{chapter_label}':"
-        f"fontcolor=#FFD700:alpha={text_fade}:fontsize=44:"
+        f"fontcolor=#FFD700:fontsize=44:"
         f"borderw=2:bordercolor=#000000:"
         f"shadowcolor=#000000@0.9:shadowx=3:shadowy=3:"
         f"x=(w-text_w)/2:y=th+380[txt1];"
         f"[txt1]drawtext=fontfile='{_font_arg(font)}':text='{safe_title}':"
-        f"fontcolor=#FFFFFF:alpha={subtitle_fade}:fontsize=62:"
+        f"fontcolor=#FFFFFF:fontsize=62:"
         f"borderw=3:bordercolor=#000000:"
         f"shadowcolor=#000000@0.9:shadowx=4:shadowy=4:"
         f"x=(w-text_w)/2:y=th+480"
