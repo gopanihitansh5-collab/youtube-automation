@@ -831,11 +831,11 @@ def main():
         for sc in ch["scenes"]:
             all_scenes.append(sc)
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
-try:
-    from concurrent.futures import TimeoutError as FuturesTimeout
-except ImportError:
-    FuturesTimeout = TimeoutError  # Python < 3.11 compat
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    try:
+        from concurrent.futures import TimeoutError as FuturesTimeout
+    except ImportError:
+        FuturesTimeout = TimeoutError  # Python < 3.11 compat
     _VOICE_TIMEOUT = 300
     _VISUAL_TIMEOUT = 300
 
