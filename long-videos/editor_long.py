@@ -120,12 +120,12 @@ def _chapter_title_card(title, chapter_num, dur, out, index=0):
         f"fontcolor=#FFD700:alpha={text_fade}:fontsize=44:"
         f"borderw=2:bordercolor=#000000:"
         f"shadowcolor=#000000@0.9:shadowx=3:shadowy=3:"
-        f"x=(w-text_w)/2:y=th+380:t=1[txt1];"
+        f"x=(w-text_w)/2:y=th+380[txt1];"
         f"[txt1]drawtext=fontfile='{_font_arg(font)}':text='{safe_title}':"
         f"fontcolor=#FFFFFF:alpha={subtitle_fade}:fontsize=62:"
         f"borderw=3:bordercolor=#000000:"
         f"shadowcolor=#000000@0.9:shadowx=4:shadowy=4:"
-        f"x=(w-text_w)/2:y=th+480:t=1"
+        f"x=(w-text_w)/2:y=th+480"
     )
     _run(["ffmpeg", "-y", "-f", "lavfi", "-i",
           f"color=c=black:s={W}x{H}:d={dur:.3f}:r={FPS}",
