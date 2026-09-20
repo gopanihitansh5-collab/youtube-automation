@@ -115,7 +115,7 @@ def _chapter_title_card(title, chapter_num, dur, out, index=0):
 
     vf = (
         f"gradients=s={W}x{H}:c0={c0}:c1={c1}:c2={c2}:c3={c3}:"
-        f"speed=0.008:rotation=0.2:d={dur:.3f}:r={FPS}[bg];"
+        f"speed=0.008:d={dur:.3f}:r={FPS}[bg];"
         f"[bg]drawtext=fontfile='{_font_arg(font)}':text='{chapter_label}':"
         f"fontcolor=#FFD700@{text_fade}:fontsize=44:"
         f"borderw=2:bordercolor=#000000:"
@@ -195,7 +195,7 @@ def _norm_gradient(dur, out, index=0):
         _run(["ffmpeg", "-y", "-f", "lavfi",
               "-i",
               f"gradients=s={W}x{H}:c0={c0}:c1={c1}:c2={c2}:c3={c3}:"
-              f"speed=0.015:rotation=0.3:d={dur:.3f}:r={FPS}",
+              f"speed=0.015:d={dur:.3f}:r={FPS}",
               "-c:v", "libx264", "-preset", "slow", "-crf", "16",
               "-pix_fmt", "yuv420p", out])
     except subprocess.CalledProcessError:
