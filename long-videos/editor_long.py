@@ -434,11 +434,12 @@ def build(chapters, scene_visuals, scene_audios, scene_words,
     os.makedirs(norm_dir, exist_ok=True)
 
     print(f"  normalizing {len(scene_visuals)} scenes ...", flush=True)
+    flat_durations = [dur for chapter in chapter_durations for dur in chapter]
     with ThreadPoolExecutor(max_workers=min(4, len(scene_visuals))) as pool:
         norm = list(pool.map(
             lambda iv: _normalize(
                 iv[1],
-                sum(chapter_durations[iv[0]]) if isinstance(iv[0], int) else 5.0,
+                flat_durations[iv[0]] if iv[0] < len(flat_durations) else 5.0,
                 f"{norm_dir}/scene_{iv[0]}.mp4", iv[0]),
             enumerate(scene_visuals)))
 
