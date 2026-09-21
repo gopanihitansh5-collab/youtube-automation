@@ -120,12 +120,12 @@ def _chapter_title_card(title, chapter_num, dur, out, index=0):
         f"fontcolor=#FFFFFF:fontsize=62:"
         f"borderw=3:bordercolor=#000000:"
         f"shadowcolor=#000000@0.9:shadowx=4:shadowy=4:"
-        f"x=(w-text_w)/2:y=th+480"
+        f"x=(w-text_w)/2:y=th+480[out]"
     )
     _run(["ffmpeg", "-y", "-f", "lavfi", "-i",
           f"color=c=black:s={W}x{H}:d={dur:.3f}:r={FPS}",
           "-filter_complex", vf,
-          "-map", "[txt1]",
+          "-map", "[out]",
           "-c:v", "libx264", "-preset", "slow", "-crf", "16",
           "-pix_fmt", "yuv420p", out])
     return out
