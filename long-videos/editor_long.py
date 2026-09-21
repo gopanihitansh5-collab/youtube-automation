@@ -254,8 +254,11 @@ def _concat_xfade(paths, out, xfade_dur=SCENE_XFADE_DUR,
     _run(["ffmpeg", "-y"] + inputs +
          ["-filter_complex", filter_complex,
           "-map", f"[v{n - 1}]",
-          "-c:v", "libx264", "-preset", "slow", "-crf", "16",
-          "-pix_fmt", "yuv420p", out])
+          # Crossfades over a full long-form timeline are expensive at the
+          # slow preset and exceeded the runner's 15-minute command timeout.
+          # Fast keeps CRF 16 quality while making this assembly stage viable.
+          "-c:v", "libx264", "-preset", "fast", "-crf", "16",
+          "-pix_fmt", "yuv420p", out], timeout=1800)
     return out
 
 
