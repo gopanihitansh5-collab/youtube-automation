@@ -10,8 +10,6 @@ import os
 import base64
 import subprocess
 import re
-import json
-import shutil
 import urllib.request
 
 W, H = 1280, 720
@@ -19,7 +17,7 @@ W, H = 1280, 720
 FONT_DIR = "assets/fonts"
 
 FONT_CANDIDATES = [
-    f"{FONT_DIR}/DejaVuSans-Bold.ttf",
+    f"{FONT_DIR}/OpenSans-Bold.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
     "C:/Windows/Fonts/arialbd.ttf",
     "C:/Windows/Fonts/arial.ttf",
@@ -27,8 +25,10 @@ FONT_CANDIDATES = [
 ]
 
 _FONT_URLS = {
-    "DejaVuSans-Bold.ttf": "https://github.com/dejavu-fonts/dejavu-fonts/raw/release-2_37/ttf/DejaVuSans-Bold.ttf",
-    "DejaVuSans.ttf": "https://github.com/dejavu-fonts/dejavu-fonts/raw/release-2_37/ttf/DejaVuSans.ttf",
+    "OpenSans-Bold.ttf": (
+        "https://raw.githubusercontent.com/google/fonts/main/ofl/opensans/"
+        "OpenSans%5Bwdth%2Cwght%5D.ttf"
+    ),
 }
 
 
@@ -175,7 +175,7 @@ _VISUAL_STYLES = {
 }
 
 
-def generate_base(title, hook, out_path, api_key=None):
+def generate_base(title, hook, out_path, api_key=None, extra_context=None):
     """Generate base thumbnail image via Imagen 4 with dynamic topic-adaptive prompt."""
     key = api_key or os.environ.get("GEMINI_API_KEY")
     if not key:
@@ -198,10 +198,19 @@ def generate_base(title, hook, out_path, api_key=None):
     ]
     extra = rng.choice(mood_extras)
 
+    context = extra_context or {}
+    context_parts = [
+        f"Target region: {context.get('region')}" if context.get("region") else "",
+        f"Video angle: {context.get('video_angle')}" if context.get("video_angle") else "",
+        f"Why it matters: {context.get('reason')}" if context.get("reason") else "",
+    ]
+    context_text = ". ".join(part for part in context_parts if part)
+
     prompt = (
         f"Professional YouTube thumbnail for video titled '{title}'. "
         f"Core hook: '{hook}'. "
-        f"16:9 landscape, 1280x720. "
+        + (f"Topic context: {context_text}. " if context_text else "")
+        + f"16:9 landscape, 1280x720. "
         f"Style: {cat.upper()} category aesthetic. "
         f"Color palette: {style['palette']}. "
         f"Lighting: {style['lighting']}. "
@@ -312,7 +321,7 @@ def enhance(image_path, title, hook, out_path, style="bold_split"):
             f"fontcolor=#FFFFFF:fontsize=44:"
             f"borderw=3:bordercolor=#000000:"
             f"shadowcolor=#000000@0.9:shadowx=4:shadowy=4:"
-            f"x=(w-text_w)/2:y={int(style_config['title_y']) + 60}:"
+            f"x=(w-text_w)/2:y=({style_config['title_y']})+60:"
             f"box=0:boxcolor=black@0.3:boxborderw=8,"
         )
 
@@ -320,7 +329,7 @@ def enhance(image_path, title, hook, out_path, style="bold_split"):
         f"drawtext=fontfile='{_font_arg(font)}':text='{safe_hook}':"
         f"fontcolor=#FFFFFF@0.85:fontsize=28:"
         f"borderw=2:bordercolor=#000000:"
-        f"x=(w-text_w)/2:y={style_config['subtitle_y'] + 60}:"
+        f"x=(w-text_w)/2:y=({style_config['subtitle_y']})+60:"
         f"box=0:boxcolor=black@0.2:boxborderw=6"
     )
 
@@ -355,7 +364,7 @@ def enhance(image_path, title, hook, out_path, style="bold_split"):
 
 
 def make(title, hook, video_path=None, out_path="output_long/thumbnail.jpg",
-         style="bold_split"):
+         style="bold_split", extra_context=None):
     """Full pipeline: generate → enhance → output.
 
     Args:
@@ -364,15 +373,17 @@ def make(title, hook, video_path=None, out_path="output_long/thumbnail.jpg",
         video_path: optional video path for frame fallback
         out_path: output path (.jpg or .png)
         style: thumbnail style name
+        extra_context: optional topic metadata used to guide image generation
 
     Returns:
         path to final thumbnail, or None
     """
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
 
-    base_path = out_path.replace(".jpg", "_base.png").replace(".png", "_base.png")
+    output_path = os.path.splitext(out_path)[0]
+    base_path = f"{output_path}_base.png"
 
-    base = generate_base(title, hook, base_path)
+    base = generate_base(title, hook, base_path, extra_context=extra_context)
     if not base and video_path:
         base = extract_from_video(video_path, base_path)
 
