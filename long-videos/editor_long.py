@@ -111,9 +111,7 @@ def _chapter_title_card(title, chapter_num, dur, out, index=0):
 
     animate_zoom = f"1+0.015*sin(2*PI*on/{frames})+0.01*on/{frames}"
     vf = (
-        f"gradients=s={W}x{H}:c0={c0}:c1={c1}:c2={c2}:c3={c3}:"
-        f"speed=0.008:d={dur:.3f}:r={FPS}[bg];"
-        f"[bg]drawtext=fontfile='{_font_arg(font)}':text='{chapter_label}':"
+        f"[0:v]drawtext=fontfile='{_font_arg(font)}':text='{chapter_label}':"
         f"fontcolor=#FFD700:fontsize=44:"
         f"borderw=2:bordercolor=#000000:"
         f"shadowcolor=#000000@0.9:shadowx=3:shadowy=3:"
