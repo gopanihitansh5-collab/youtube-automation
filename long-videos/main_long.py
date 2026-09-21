@@ -846,8 +846,10 @@ def main():
 
     def _visual_job(i_sc):
         i, sc = i_sc
-        return visuals.get_visual(sc["keyword"], f"output_long/vis_{i}",
-                                  scene_index=i, orientation="landscape")
+        return visuals.get_visual(
+            sc["keyword"], f"output_long/vis_{i}", scene_index=i,
+            orientation="landscape", scene_text=sc.get("narration", ""),
+        )
 
     voice_results = [None] * len(all_scenes)
     visual_results = [None] * len(all_scenes)
