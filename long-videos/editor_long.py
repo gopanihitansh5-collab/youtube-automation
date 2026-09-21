@@ -17,9 +17,9 @@ W, H, FPS = 1920, 1080, 24
 CHAPTER_XFADE_DUR = 1.2
 SCENE_XFADE_DUR = 0.4
 
-TRANSITION_STYLES = ["fade", "slideleft", "slideright", "fadeblack",
-                     "fadewhite", "pixelize", "glow", "hslbright",
-                     "smoothleft", "smoothright", "circlepaint"]
+# Keep the runner-compatible baseline. Some named xfade transitions are
+# unavailable in the Ubuntu FFmpeg build used by GitHub Actions.
+TRANSITION_STYLES = ["fade"]
 
 # Brand color palette — consistent across all channel videos
 BRAND_PALETTES = [
