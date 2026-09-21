@@ -8,6 +8,9 @@ repeatedly polishing one file.
 
 - [x] Make upload failures fail the workflow instead of producing a false green run.
 - [x] Repair long-form thumbnail context handling and add regression tests.
+- [x] Map and code the optional ComfyUI whiteboard provider behind configuration.
+- [ ] Configure an approved GPU host and render the two-scene, 10-second whiteboard proof.
+- [ ] Evaluate line-art conditioning and short AnimateDiff clips after the still proof.
 - [ ] Separate the long-form pipeline orchestration in `main_long.py` into testable stages.
 - [ ] Add fast unit tests for topic selection, script normalization, and upload error paths.
 - [ ] Add lint/type-check configuration and run it in a lightweight CI job.
