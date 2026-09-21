@@ -1,0 +1,16 @@
+{
+  "provider": "comfy-cloud",
+  "base_url_env": "COMFYUI_BASE_URL",
+  "api_key_env": "COMFYUI_API_KEY",
+  "api_key_header": "Authorization",
+  "api_key_prefix": "Bearer ",
+  "workflow_path": "workflow_api.json",
+  "request_timeout_seconds": 30,
+  "poll_interval_seconds": 2,
+  "job_timeout_seconds": 240,
+  "width": 1344,
+  "height": 768,
+  "steps": 24,
+  "cfg": 6.5,
+  "checkpoint": "REPLACE_WITH_HOSTED_CHECKPOINT.safetensors"
+}
