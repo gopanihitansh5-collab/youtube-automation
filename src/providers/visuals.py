@@ -374,14 +374,28 @@ def _pixabay(keyword, scene_index, out_path):
 
 
 # ----------------------------------------------------------------- public
-def get_visual(keyword, out_base, scene_index=0, orientation="portrait"):
+def get_visual(keyword, out_base, scene_index=0, orientation="portrait", scene_text=""):
     """Return (path, kind, provider_name). Never raises -- gradient always works.
 
     Walks the provider chain in order, caching failures per keyword so we
     don't retry a provider for the same keyword within a single run.
     orientation: "portrait" (9:16 Shorts) or "landscape" (16:9 long-form).
+    scene_text: optional narration context for generative visual providers.
     """
     chain = []
+
+    if os.environ.get("VISUAL_STYLE", "").lower() == "whiteboard":
+        try:
+            from comfyui_whiteboard import is_configured, render_scene
+            if is_configured() and not _has_failed("comfyui-whiteboard", keyword):
+                chain.append((
+                    "comfyui-whiteboard",
+                    lambda kw, p: render_scene(scene_text or kw, kw, p),
+                    out_base + ".png",
+                    "image",
+                ))
+        except ImportError as exc:
+            print(f"  ComfyUI whiteboard provider unavailable: {exc}", flush=True)
 
     if os.environ.get("PEXELS_API_KEY") and not _has_failed("pexels", keyword):
         chain.append((
