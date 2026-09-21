@@ -568,7 +568,10 @@ def build(chapters, scene_visuals, scene_audios, scene_words,
     cmd += [
         "-filter_complex", f"{filter_complex};{audio_filter}",
         "-map", "[v]", *audio_maps,
-        "-c:v", "libx264", "-preset", "slow", "-crf", "16",
+        # The final full-resolution filter pass is heavier than segment
+        # assembly. The slow preset processed only ~4 of 7 minutes before
+        # the runner's 15-minute command timeout. Keep CRF 16, use fast.
+        "-c:v", "libx264", "-preset", "fast", "-crf", "16",
         "-profile:v", "high", "-level", "4.1",
         "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "256k",
@@ -583,9 +586,9 @@ def build(chapters, scene_visuals, scene_audios, scene_words,
         out_path,
     ]
 
-    print("  encoding final cinematic video (CRF 16, preset slow, "
+    print("  encoding final cinematic video (CRF 16, preset fast, "
           "48kHz AAC) ...", flush=True)
-    _run(cmd)
+    _run(cmd, timeout=1800)
 
     if os.path.exists(out_path):
         _run([
