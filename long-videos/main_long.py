@@ -991,8 +991,12 @@ def main():
             print(f"Uploaded: {url}", flush=True)
             sheets.mark_done(item, url)
         except Exception as e:
-            print(f"WARNING: upload failed ({e}) -- video in output_long/",
+            # Upload is part of this workflow's promised outcome. Preserve the
+            # rendered artifact, but fail the process so Actions cannot report
+            # a false green run when YouTube rejected the upload.
+            print(f"ERROR: upload failed ({e}) -- video in output_long/",
                   flush=True)
+            return 1
 
     print("Done.", flush=True)
     return 0
