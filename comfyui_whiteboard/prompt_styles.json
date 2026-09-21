@@ -1,0 +1,6 @@
+{
+  "whiteboard": {
+    "positive_prefix": "whiteboard explainer illustration, clean white background, confident black marker line art, simple educational diagram, generous negative space, consistent visual language, hand-drawn arrows and labels without readable text, high contrast, 16:9 composition",
+    "negative_prompt": "photorealistic, photograph, dark background, color fill, clutter, tiny details, illegible text, watermark, logo, frame, border, low contrast, blur, distorted hands"
+  }
+}
