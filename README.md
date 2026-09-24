@@ -99,4 +99,4 @@ Output: `output/final.mp4`, `output/metadata.json`, `output/subs.ass`.
 Short launch video for the project:
 
 - Video: [brag-output/brag.mp4](brag-output/brag.mp4) (poster: [brag-output/brag.jpg](brag-output/brag.jpg))
-- Plan and share copy: [brag-output/brag-plan.md](brag-output/brag-plan.md)
+- Share copy: [brag-output/share-copy.md](brag-output/share-copy.md)
