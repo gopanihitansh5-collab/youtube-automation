@@ -100,3 +100,9 @@ jobs:
             output/used_visuals.json
           if-no-files-found: warn
           retention-days: 7
+      - name: Heartbeat (success)
+        if: success()
+        run: curl -fsS -m 10 --retry 3 "${{ secrets.HC_PING_SHORTS }}" || true
+      - name: Heartbeat (failure)
+        if: failure()
+        run: curl -fsS -m 10 --retry 3 "${{ secrets.HC_PING_SHORTS }}/fail" || true

@@ -116,6 +116,17 @@ def main():
             llm_used = "offline-fallback"
 
     report["providers"]["script"] = llm_used
+    from src import quality_gate
+    ok, why = quality_gate.check(plan["scenes"])
+    report["quality_gate"] = {"passed": ok, "reason": why}
+    if not ok:
+        os.makedirs("output", exist_ok=True)
+        with open("output/metadata.json", "w", encoding="utf-8") as f:
+            json.dump(report, f, indent=2, ensure_ascii=False)
+        print(f"ERROR: quality gate blocked this run -- {why}. "
+              f"Nothing rendered or uploaded.", flush=True)
+        return 1
+    print(f"  quality gate: {why}", flush=True)
     scenes = plan["scenes"]
     hook = plan["hook"]
     v = plan.get("virality_score", 0)
@@ -268,3 +279,4 @@ if __name__ == "__main__":
     except Exception:
         traceback.print_exc()
         sys.exit(1)
+

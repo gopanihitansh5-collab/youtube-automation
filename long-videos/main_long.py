@@ -47,7 +47,7 @@ from web_search_tool import (search_web, get_daily_briefing, get_trending_news,
 from topic_context import (TopicContext, parse_topic_context, store_context,
                            build_script_context_block, build_thumbnail_context,
                            build_transcript_context, integrate_context_into_pipeline)
-from script_cache import (cache_script, load_cached_script, clear_cache,
+from script_cache import (cache_script, load_cached_script, clear_cache, clear_stages,
                           save_run_state, get_run_state, is_step_completed,
                           clear_run_state, estimate_tokens, suggest_model)
 from caption_emphasis import tag_all_scenes
@@ -428,7 +428,15 @@ def _get_topic():
             print(f"Built-in candidate: {pick.get('topic','')!r}", flush=True)
 
     # --- 4. LLM trending evaluation + suggestion from trends ---
-    gemini_eval_possible = bool(os.environ.get("GEMINI_API_KEY"))
+    # Script generation gets first claim on the Gemini free quota. Trend
+    # search/eval burned it (429) before the script step ran, so it is off
+    # unless TREND_USE_GEMINI=1. Step 5 below still runs if static topics
+    # are exhausted.
+    gemini_key = bool(os.environ.get("GEMINI_API_KEY"))
+    gemini_eval_possible = gemini_key and os.environ.get(
+        "TREND_USE_GEMINI", "").lower() in ("1", "true", "yes")
+    if gemini_key and not gemini_eval_possible:
+        print("  trend eval: Gemini reserved for the script step", flush=True)
 
     if gemini_eval_possible:
         # Fetch live regional trends first
@@ -461,7 +469,7 @@ def _get_topic():
         return item
 
     # --- 5. All static sources exhausted — LLM live generation ---
-    if gemini_eval_possible:
+    if gemini_key:
         print("All static topics exhausted → asking LLM to generate LIVE trending topic...", flush=True)
         llm_item = _llm_suggest_trending_topic()
         if llm_item:
@@ -475,28 +483,8 @@ from longform_prompt import build_long_prompt, build_offline_long_script
 from editor_long import build as editor_build, probe_duration
 from thumbnail import make as make_thumbnail
 
-GROQ_MODELS = [
-    "llama-3.3-70b-versatile",
-    "llama-4-scout-17b-16e-instruct",
-    "llama-3.1-8b-instant",
-    "qwen-2.5-32b",
-]
-
-GEMINI_MODELS = [
-    "gemini-3.5-flash",
-    "gemini-3.1-flash-lite",
-    "gemini-3-flash-preview",
-    "gemini-2.5-flash",
-    "gemini-2.5-pro",
-    "gemini-2.0-flash",
-]
-
-OPENROUTER_MODELS = [
-    "deepseek/deepseek-chat-v3-0324:free",
-    "meta-llama/llama-3.3-70b-instruct:free",
-    "google/gemma-3-27b-it:free",
-    "qwen/qwen-2.5-72b-instruct:free",
-]
+from free_models import GROQ_MODELS, GEMINI_MODELS, OPENROUTER_FALLBACK as OPENROUTER_MODELS, openrouter_free_models
+import quality_gate
 
 HF_MODELS = [
     "meta-llama/Llama-3.1-8B-Instruct",
@@ -553,8 +541,7 @@ def _groq_long(topic, prompt, temperature):
     if not key:
         raise RuntimeError("GROQ_API_KEY not set")
     last_err = None
-    best_model = suggest_model(prompt, GROQ_MODELS, provider="groq", reserve_output=8192)
-    models_to_try = [best_model] if best_model else GROQ_MODELS
+    models_to_try = GROQ_MODELS
     for model in models_to_try:
         try:
             print(f"    Groq trying {model} (prompt ~{estimate_tokens(prompt)}t)", flush=True)
@@ -584,8 +571,7 @@ def _gemini_search_long(topic, prompt, temperature):
     if not key:
         raise RuntimeError("GEMINI_API_KEY not set")
     last_err = None
-    best_model = suggest_model(prompt, GEMINI_MODELS, provider="gemini", reserve_output=12288)
-    models_to_try = [best_model] if best_model else GEMINI_MODELS
+    models_to_try = GEMINI_MODELS
     for model in models_to_try:
         try:
             print(f"    Gemini trying {model} (prompt ~{estimate_tokens(prompt)}t)", flush=True)
@@ -638,8 +624,7 @@ def _openrouter_long(topic, prompt, temperature):
     if not token:
         raise RuntimeError("OPENROUTER_API_KEY not set")
     last_err = None
-    best_model = suggest_model(prompt, OPENROUTER_MODELS, provider="openrouter", reserve_output=8192)
-    models_to_try = [best_model] if best_model else OPENROUTER_MODELS
+    models_to_try = openrouter_free_models()
     for model in models_to_try:
         try:
             print(f"    OpenRouter trying {model} (prompt ~{estimate_tokens(prompt)}t)", flush=True)
@@ -704,6 +689,10 @@ def _generate_long_plan(topic, topic_ctx=None):
 
     # Check if we already have a cached script
     cached = load_cached_script()
+    if cached and "offline" in str(cached.get("llm_used", "")).lower():
+        print("  cached script came from offline builder -- ignoring", flush=True)
+        clear_cache()
+        cached = None
     if cached and cached.get("topic") == topic:
         print(f"  using cached script from {cached.get('cached_at','')}", flush=True)
         plan = cached["plan"]
@@ -729,7 +718,7 @@ def _generate_long_plan(topic, topic_ctx=None):
     # Primary: Multi-LLM pipeline with reviewer agents
     try:
         plan, llm_chain, models_used = run_full_pipeline(topic, trending_context)
-        if plan and plan.get("chapters"):
+        if plan and plan.get("chapters") and "offline" not in str(llm_chain).lower():
             total_scenes = sum(len(c.get("scenes", [])) for c in plan["chapters"])
             if total_scenes >= 15:
                 print(f"  multi-LLM pipeline: {len(plan['chapters'])} ch, "
@@ -751,10 +740,10 @@ def _generate_long_plan(topic, topic_ctx=None):
           f"scenes/ch: {meta['scenes_per_chapter']} | temp: {temp}", flush=True)
 
     chain = []
-    if os.environ.get("GROQ_API_KEY"):
-        chain.append(("groq-llama3.3-70b", lambda: _groq_long(topic, dyn_prompt, temp)))
     if os.environ.get("GEMINI_API_KEY"):
         chain.append(("gemini-search", lambda: _gemini_search_long(topic, dyn_prompt, temp)))
+    if os.environ.get("GROQ_API_KEY"):
+        chain.append(("groq-gpt-oss", lambda: _groq_long(topic, dyn_prompt, temp)))
     if os.environ.get("OPENROUTER_API_KEY"):
         chain.append(("openrouter-free", lambda: _openrouter_long(topic, dyn_prompt, temp)))
     if os.environ.get("HF_TOKEN"):
@@ -812,6 +801,16 @@ def main():
 
     plan, llm_used, meta = _generate_long_plan(topic, topic_ctx=_TOPIC_CTX)
     report["providers"]["script"] = llm_used
+
+    ok, why = quality_gate.check(plan, llm_used)
+    report["quality_gate"] = {"passed": ok, "reason": why}
+    if not ok:
+        with open("output_long/metadata.json", "w", encoding="utf-8") as f:
+            json.dump(report, f, indent=2, ensure_ascii=False)
+        print(f"ERROR: quality gate blocked this run -- {why}. "
+              f"Nothing rendered or uploaded.", flush=True)
+        return 1
+    print(f"  quality gate: {why}", flush=True)
     chapters = plan["chapters"]
     hook = plan["hook"]
     print(f"Title: {plan['title']}\nHook: {hook}\nChapters: {len(chapters)}"
@@ -991,6 +990,7 @@ def main():
             with open("output_long/metadata.json", "w", encoding="utf-8") as f:
                 json.dump(report, f, indent=2, ensure_ascii=False)
             print(f"Uploaded: {url}", flush=True)
+            clear_stages(topic)
             sheets.mark_done(item, url)
         except Exception as e:
             # Upload is part of this workflow's promised outcome. Preserve the
@@ -1010,3 +1010,4 @@ if __name__ == "__main__":
     except Exception:
         traceback.print_exc()
         sys.exit(1)
+

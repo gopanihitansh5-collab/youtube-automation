@@ -18,6 +18,8 @@ _CHARS_PER_TOKEN = 4
 # Context windows (max input tokens) for each model family
 MODEL_CONTEXTS = {
     "groq": {
+        "openai/gpt-oss-120b": 131072,
+        "openai/gpt-oss-20b": 131072,
         "llama-3.3-70b-versatile": 131072,
         "llama-4-scout-17b-16e-instruct": 1048576,
         "llama-3.1-8b-instant": 131072,
@@ -30,11 +32,14 @@ MODEL_CONTEXTS = {
         "gemini-3-flash-preview": 1048576,
         "gemini-2.5-flash": 1048576,
         "gemini-2.5-pro": 1048576,
-        "gemini-2.0-flash": 1048576,
+        "gemini-flash-latest": 1048576,
         "__default__": 1048576,
     },
     "openrouter": {
-        "deepseek/deepseek-chat-v3-0324:free": 131072,
+        "nvidia/nemotron-3-super-120b-a12b:free": 262144,
+        "google/gemma-4-31b-it:free": 262144,
+        "qwen/qwen3.8-27b:free": 262144,
+        "nvidia/nemotron-3-ultra-550b-a55b:free": 1000000,
         "meta-llama/llama-3.3-70b-instruct:free": 131072,
         "google/gemma-3-27b-it:free": 131072,
         "qwen/qwen-2.5-72b-instruct:free": 131072,
@@ -81,7 +86,10 @@ def suggest_model(prompt: str, models: list, provider: str = "gemini",
 # ─── Script Caching ──────────────────────────────────────────────────
 
 def cache_script(plan: dict, topic: str, llm_used: str):
-    """Save the generated script plan to disk."""
+    """Save the generated script plan to disk. Offline plans are never cached."""
+    if "offline" in str(llm_used).lower():
+        print("  script cache: skipped (offline plan)", flush=True)
+        return
     os.makedirs(_CACHE_DIR, exist_ok=True)
     data = {
         "topic": topic,
@@ -167,3 +175,57 @@ def is_step_completed(step: str) -> bool:
     last_idx = steps.index(state["last_step"]) if state["last_step"] in steps else -1
     target_idx = steps.index(step) if step in steps else -1
     return target_idx <= last_idx
+
+
+
+# ─── Per-stage checkpoints ───────────────────────────────────────────
+# Each LLM stage saves its JSON output keyed by topic, so a re-run (or a
+# retried job restored from actions/cache) skips stages that already
+# succeeded and spends no quota on them.
+
+import hashlib
+
+_CKPT_DIR = os.path.join(_CACHE_DIR, "checkpoints")
+
+
+def _ckpt_path(stage: str, topic: str) -> str:
+    key = hashlib.sha1(topic.strip().lower().encode("utf-8")).hexdigest()[:12]
+    return os.path.join(_CKPT_DIR, f"{key}--{stage}.json")
+
+
+def save_stage(stage: str, topic: str, data, model: str = ""):
+    """Checkpoint one stage's output. Offline outputs are not saved."""
+    if "offline" in str(model).lower():
+        return
+    os.makedirs(_CKPT_DIR, exist_ok=True)
+    payload = {"stage": stage, "topic": topic, "model": model,
+               "saved_at": datetime.datetime.now().isoformat(), "data": data}
+    with open(_ckpt_path(stage, topic), "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, ensure_ascii=False, default=str)
+    print(f"  checkpoint saved: {stage}", flush=True)
+
+
+def load_stage(stage: str, topic: str):
+    """Return (data, model) for a saved stage, or (None, None)."""
+    path = _ckpt_path(stage, topic)
+    if not os.path.exists(path):
+        return None, None
+    try:
+        with open(path, encoding="utf-8") as f:
+            payload = json.load(f)
+        if payload.get("topic", "").strip().lower() != topic.strip().lower():
+            return None, None
+        print(f"  checkpoint hit: {stage} ({payload.get('model','')})", flush=True)
+        return payload.get("data"), payload.get("model", "") + "(ckpt)"
+    except (json.JSONDecodeError, OSError):
+        return None, None
+
+
+def clear_stages(topic: str):
+    """Remove all checkpoints for a topic (after a successful upload)."""
+    if not os.path.isdir(_CKPT_DIR):
+        return
+    prefix = os.path.basename(_ckpt_path("x", topic)).split("--")[0]
+    for name in os.listdir(_CKPT_DIR):
+        if name.startswith(prefix + "--"):
+            os.remove(os.path.join(_CKPT_DIR, name))
