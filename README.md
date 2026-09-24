@@ -93,3 +93,10 @@ Output: `output/final.mp4`, `output/metadata.json`, `output/subs.ass`.
 - GitHub cron can drift; schedules pause after 60 days of repo inactivity.
 - Keep `privacy: unlisted` until you trust the output — automated `public`
   posting risks strikes.
+
+## Launch video
+
+Short launch video for the project:
+
+- Video: [brag-output/brag.mp4](brag-output/brag.mp4) (poster: [brag-output/brag.jpg](brag-output/brag.jpg))
+- Plan and share copy: [brag-output/brag-plan.md](brag-output/brag-plan.md)

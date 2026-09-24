@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <title>youtube-automation - brag</title>
+    <script src="assets/vendor/gsap.min.js"></script>
+    <style>
+      body { margin: 0; background: #0b0b0f; color: #f5f4f0; font-family: system-ui, sans-serif; }
+      #root { position: relative; width: 100%; height: 100%; overflow: hidden; background: #0b0b0f; }
+      .clip { position: absolute; inset: 0; }
+      .mono { font-family: ui-monospace, monospace; }
+      #glow { position: absolute; inset: -20%; background: radial-gradient(ellipse 55% 45% at 50% 62%, #ff4e4524, transparent 70%); opacity: 0.1; }
+      .scene { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; box-sizing: border-box; padding: 80px; }
+      #brand { position: absolute; top: 56px; left: 72px; display: flex; align-items: center; gap: 14px; font-size: 28px; font-weight: 700; }
+      .play { display: block; width: 34px; height: 24px; background: #ff4e45; border-radius: 6px; position: relative; }
+      .play::after { content: ""; position: absolute; left: 12px; top: 5px; border-left: 12px solid #0b0b0f; border-top: 7px solid transparent; border-bottom: 7px solid transparent; }
+      .h1 { font-size: 112px; font-weight: 800; letter-spacing: -0.02em; margin: 0; text-align: center; line-height: 1.06; }
+      .red { color: #ff4e45; }
+      .label { font-size: 26px; letter-spacing: 0.34em; color: #9a97a3; margin-bottom: 44px; }
+      .stage { display: flex; align-items: baseline; gap: 30px; width: 1240px; padding: 17px 0; border-bottom: 1px solid rgba(245,244,240,0.09); }
+      .stage:last-child { border-bottom: none; }
+      .stage .sn { font-size: 26px; color: #ff4e45; width: 56px; }
+      .stage .sname { font-size: 40px; font-weight: 750; width: 300px; letter-spacing: 0.04em; }
+      .stage .scap { font-size: 28px; color: #9a97a3; }
+      .fline { font-size: 44px; color: #9a97a3; margin-bottom: 40px; text-align: center; }
+      #chain { display: flex; align-items: center; gap: 22px; }
+      .fchip { font-size: 32px; padding: 20px 34px; background: rgba(245,244,240,0.05); border: 1px solid rgba(245,244,240,0.14); border-radius: 14px; box-sizing: border-box; white-space: nowrap; }
+      .farrow { font-size: 32px; color: #9a97a3; }
+      #punch { font-size: 58px; font-weight: 800; margin-top: 56px; text-align: center; }
+      #punch .g { color: #3ddc97; }
+      #stats { display: flex; gap: 34px; }
+      .stat { display: flex; flex-direction: column; align-items: center; gap: 14px; width: 400px; padding: 48px 0 42px; background: rgba(245,244,240,0.05); border: 1px solid rgba(245,244,240,0.14); border-radius: 20px; box-sizing: border-box; }
+      .stat .sv { font-size: 56px; font-weight: 800; color: #ff4e45; }
+      .stat .sl { font-size: 26px; color: #9a97a3; }
+      #logo { display: flex; align-items: center; gap: 26px; }
+      #logo .play { width: 92px; height: 66px; border-radius: 16px; }
+      #logo .play::after { left: 34px; top: 15px; border-left-width: 32px; border-top-width: 18px; border-bottom-width: 18px; }
+      #logo span { font-size: 110px; font-weight: 800; letter-spacing: -0.02em; }
+      #tag { font-size: 40px; color: #f5f4f0; margin-top: 36px; }
+      #fine { font-size: 26px; color: #9a97a3; margin-top: 56px; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-width="1920" data-height="1080" data-duration="20.6">
+      <div id="glow"></div>
+
+      <section id="s1" class="clip" data-start="0" data-duration="3.0">
+        <div class="scene">
+          <div id="brand"><span class="play"></span>youtube-automation</div>
+          <div>
+            <h1 class="h1" id="hook1">A YouTube channel</h1>
+            <h1 class="h1" id="hook2"><span class="red">that runs itself.</span></h1>
+          </div>
+        </div>
+      </section>
+
+      <section id="s2" class="clip" data-start="3.0" data-duration="7.4">
+        <div class="scene">
+          <div class="label mono" id="s2label">THE PIPELINE</div>
+          <div>
+            <div class="stage" id="st1"><span class="sn mono">01</span><span class="sname mono">TOPIC</span><span class="scap">Google Sheet, or topics.csv, or the built-in list</span></div>
+            <div class="stage" id="st2"><span class="sn mono">02</span><span class="sname mono">SCRIPT</span><span class="scap">Groq writes it - a new structure every time</span></div>
+            <div class="stage" id="st3"><span class="sn mono">03</span><span class="sname mono">VOICE</span><span class="scap">Kokoro, a local 82M-param neural voice</span></div>
+            <div class="stage" id="st4"><span class="sn mono">04</span><span class="sname mono">VISUALS</span><span class="scap">Pexels stock, or generated gradient motion</span></div>
+            <div class="stage" id="st5"><span class="sn mono">05</span><span class="sname mono">RENDER</span><span class="scap">FFmpeg - subtitles, crossfades, parallax zoom</span></div>
+            <div class="stage" id="st6"><span class="sn mono">06</span><span class="sname mono">UPLOAD</span><span class="scap">Posted to YouTube by the API</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="s3" class="clip" data-start="10.4" data-duration="4.0">
+        <div class="scene">
+          <div class="fline" id="fline">Every stage has a fallback.</div>
+          <div id="chain">
+            <div class="fchip" id="fc1">Groq</div><span class="farrow" id="fa1">&#8594;</span>
+            <div class="fchip" id="fc2">Gemini</div><span class="farrow" id="fa2">&#8594;</span>
+            <div class="fchip" id="fc3">OpenRouter</div><span class="farrow" id="fa3">&#8594;</span>
+            <div class="fchip" id="fc4">offline Qwen</div>
+          </div>
+          <div id="punch">Zero API keys? <span class="g">Still ships a watchable video.</span></div>
+        </div>
+      </section>
+
+      <section id="s4" class="clip" data-start="14.4" data-duration="3.2">
+        <div class="scene">
+          <div id="stats">
+            <div class="stat" id="stat1"><span class="sv">1080&#215;1920</span><span class="sl">vertical, H.264, subtitled</span></div>
+            <div class="stat" id="stat2"><span class="sv">8 &#215; 16</span><span class="sl">narrative arcs &#215; script formats</span></div>
+            <div class="stat" id="stat3"><span class="sv">3 hours</span><span class="sl">a new video, on cron</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="s5" class="clip" data-start="17.6" data-duration="3.0">
+        <div class="scene">
+          <div id="logo"><span class="play"></span><span>youtube-automation</span></div>
+          <div id="tag">Faceless videos. Rendered and posted by GitHub Actions.</div>
+          <div id="fine" class="mono">Free models, free stock, zero cost by default.</div>
+        </div>
+      </section>
+
+      <audio id="music" src="assets/music/bed.mp3" data-start="0" data-duration="20.6" data-track-index="10" data-volume="0.75"
+        data-automation='{"version":1,"lanes":[{"target":"volume","points":[{"t":0,"v":0},{"t":0.5,"v":0.75},{"t":19.9,"v":0.75},{"t":20.5,"v":0}]}]}'></audio>
+      <audio id="sfx-h" src="assets/sfx/impact/impactSoft_medium_000.ogg" data-start="1.37" data-duration="1.0" data-track-index="11" data-volume="0.9"></audio>
+      <audio id="sfx-t1" src="assets/sfx/interface/click_003.ogg" data-start="3.55" data-duration="0.5" data-track-index="12" data-volume="0.65"></audio>
+      <audio id="sfx-t2" src="assets/sfx/interface/click_003.ogg" data-start="4.64" data-duration="0.5" data-track-index="13" data-volume="0.65"></audio>
+      <audio id="sfx-t3" src="assets/sfx/interface/click_003.ogg" data-start="5.74" data-duration="0.5" data-track-index="14" data-volume="0.65"></audio>
+      <audio id="sfx-t4" src="assets/sfx/interface/click_003.ogg" data-start="6.82" data-duration="0.5" data-track-index="15" data-volume="0.65"></audio>
+      <audio id="sfx-t5" src="assets/sfx/interface/click_003.ogg" data-start="7.92" data-duration="0.5" data-track-index="16" data-volume="0.65"></audio>
+      <audio id="sfx-t6" src="assets/sfx/interface/click_003.ogg" data-start="9.29" data-duration="0.5" data-track-index="17" data-volume="0.65"></audio>
+      <audio id="sfx-f1" src="assets/sfx/casino/card-place-2.ogg" data-start="11.46" data-duration="0.7" data-track-index="18" data-volume="0.75"></audio>
+      <audio id="sfx-f2" src="assets/sfx/casino/card-place-2.ogg" data-start="12.02" data-duration="0.7" data-track-index="19" data-volume="0.75"></audio>
+      <audio id="sfx-f3" src="assets/sfx/casino/card-place-2.ogg" data-start="12.56" data-duration="0.7" data-track-index="20" data-volume="0.75"></audio>
+      <audio id="sfx-f4" src="assets/sfx/casino/card-place-2.ogg" data-start="13.14" data-duration="0.7" data-track-index="21" data-volume="0.75"></audio>
+      <audio id="sfx-p" src="assets/sfx/impact/impactSoft_medium_000.ogg" data-start="13.64" data-duration="1.0" data-track-index="22" data-volume="0.85"></audio>
+      <audio id="sfx-s1" src="assets/sfx/casino/card-place-2.ogg" data-start="14.73" data-duration="0.7" data-track-index="23" data-volume="0.75"></audio>
+      <audio id="sfx-s2" src="assets/sfx/casino/card-place-2.ogg" data-start="15.82" data-duration="0.7" data-track-index="24" data-volume="0.75"></audio>
+      <audio id="sfx-s3" src="assets/sfx/casino/card-place-2.ogg" data-start="16.5" data-duration="0.7" data-track-index="25" data-volume="0.75"></audio>
+      <audio id="sfx-logo" src="assets/sfx/impact/impactBell_heavy_004.ogg" data-start="18.55" data-duration="2.0" data-track-index="26" data-volume="0.85"></audio>
+    </div>
+
+    <script src="assets/audio-data.js"></script>
+    <script>
+      const tl = gsap.timeline({ paused: true });
+
+      // Scene 1 - Hook (0.27 beat-locked strong cue)
+      tl.from("#brand", { y: -16, opacity: 0, duration: 0.5, ease: "power2.out" }, 0.15);
+      tl.from("#hook1", { y: 56, opacity: 0, duration: 0.55, ease: "power3.out" }, 0.27); // beat-locked: 0.27s
+      tl.from("#hook2", { scale: 1.25, opacity: 0, duration: 0.45, ease: "power4.out" }, 1.37);
+
+      // Scene 2 - Pipeline cascade (beat-grid)
+      tl.from("#s2label", { opacity: 0, duration: 0.4 }, 3.01);
+      ["#st1", "#st2", "#st3", "#st4", "#st5", "#st6"].forEach((id, i) => {
+        tl.from(id, { x: -46, opacity: 0, duration: 0.4, ease: "power3.out" }, [3.55, 4.64, 5.74, 6.82, 7.92, 9.29][i]);
+      });
+
+      // Scene 3 - Unkillable (punch beat-locked: 13.64 strong cue)
+      tl.from("#fline", { opacity: 0, y: 18, duration: 0.5, ease: "power2.out" }, 10.93);
+      ["#fc1", "#fc2", "#fc3", "#fc4"].forEach((id, i) => {
+        tl.from(id, { y: 30, opacity: 0, duration: 0.35, ease: "back.out(1.7)" }, [11.46, 12.02, 12.56, 13.14][i]);
+      });
+      ["#fa1", "#fa2", "#fa3"].forEach((id, i) => {
+        tl.from(id, { opacity: 0, duration: 0.3 }, [11.46, 12.02, 12.56][i] + 0.15);
+      });
+      tl.from("#punch", { scale: 1.12, opacity: 0, duration: 0.45, ease: "power4.out" }, 13.64); // beat-locked: 13.64s
+
+      // Scene 4 - Proof
+      ["#stat1", "#stat2", "#stat3"].forEach((id, i) => {
+        tl.from(id, { y: 40, opacity: 0, duration: 0.4, ease: "back.out(1.5)" }, [14.73, 15.82, 16.5][i]);
+      });
+
+      // Scene 5 - Outro (logo beat-locked: 18.55 strong cue)
+      tl.from("#logo", { scale: 1.3, opacity: 0, duration: 0.5, ease: "power4.out" }, 18.55); // beat-locked: 18.55s
+      tl.from("#tag", { y: 22, opacity: 0, duration: 0.5, ease: "power2.out" }, 19.1);
+      tl.from("#fine", { opacity: 0, duration: 0.5 }, 19.6);
+
+      // Audio-reactive glow (subtle, bass)
+      if (window.AUDIO_DATA && AUDIO_DATA.frames && AUDIO_DATA.frames.length) {
+        const glow = document.getElementById("glow");
+        const n = AUDIO_DATA.frames.length;
+        for (let f = 0; f < n; f += 2) {
+          const b = AUDIO_DATA.frames[f].bands[0];
+          tl.call(
+            (function (bb) {
+              return function () { glow.style.opacity = (0.06 + 0.15 * bb).toFixed(3); };
+            })(b),
+            [],
+            f / AUDIO_DATA.fps
+          );
+        }
+      }
+
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>
