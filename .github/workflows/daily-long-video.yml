@@ -41,6 +41,14 @@ jobs:
         with:
           path: models
           key: local-models-v5
+      - name: Restore stage checkpoints
+        uses: actions/cache@v4
+        with:
+          path: output_long/checkpoints
+          key: long-ckpt-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            long-ckpt-${{ github.run_id }}-
+            long-ckpt-
       - name: Check for cached script (resumption support)
         continue-on-error: true
         run: |
@@ -83,3 +91,9 @@ jobs:
             output_long/topic_context.json
           if-no-files-found: warn
           retention-days: 14
+      - name: Heartbeat (success)
+        if: success()
+        run: curl -fsS -m 10 --retry 3 "${{ secrets.HC_PING_LONG }}" || true
+      - name: Heartbeat (failure)
+        if: failure()
+        run: curl -fsS -m 10 --retry 3 "${{ secrets.HC_PING_LONG }}/fail" || true

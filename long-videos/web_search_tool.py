@@ -14,7 +14,6 @@ GEMINI_MODELS = [
     "gemini-3-flash-preview",
     "gemini-2.5-flash",
     "gemini-2.5-pro",
-    "gemini-2.0-flash",
 ]
 
 REGIONS = {
@@ -344,3 +343,4 @@ def get_top_regions():
 
 def get_priority_regions():
     return PRIORITY_REGIONS[:]
+

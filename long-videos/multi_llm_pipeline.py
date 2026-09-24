@@ -12,7 +12,7 @@ import re
 import json
 import requests
 
-from script_cache import estimate_tokens, suggest_model
+from script_cache import estimate_tokens, suggest_model, fits_in_context
 
 
 def _safe_format(template, **kwargs):
@@ -51,35 +51,22 @@ def _extract_json_array(text):
 # ─── Provider Callers ────────────────────────────────────────────────
 # Order: Groq → OpenRouter (free) → Gemini (final review only)
 
-OPENROUTER_FREE = [
-    "deepseek/deepseek-chat-v3-0324:free",
-    "meta-llama/llama-3.3-70b-instruct:free",
-    "google/gemma-3-27b-it:free",
-    "qwen/qwen-2.5-72b-instruct:free",
-]
+from free_models import (GROQ_MODELS as FREE_GROQ_MODELS, GEMINI_MODELS as FREE_GEMINI_MODELS,
+                         OPENROUTER_FALLBACK, openrouter_free_models)
+from script_cache import save_stage, load_stage
 
-GROQ_MODELS = [
-    "llama-3.3-70b-versatile",
-    "llama-4-scout-17b-16e-instruct",
-    "llama-3.1-8b-instant",
-    "qwen-2.5-32b",
-]
+OPENROUTER_FREE = OPENROUTER_FALLBACK
 
-GEMINI_REVIEW = [
-    "gemini-3.5-flash",
-    "gemini-3.1-flash-lite",
-    "gemini-3-flash-preview",
-    "gemini-2.5-flash",
-    "gemini-2.5-pro",
-]
+GROQ_MODELS = FREE_GROQ_MODELS
+
+GEMINI_REVIEW = FREE_GEMINI_MODELS
 
 
 def _call_groq(prompt, temperature=0.7, max_tokens=12288, timeout=300):
     key = os.environ.get("GROQ_API_KEY")
     if not key:
         raise RuntimeError("GROQ_API_KEY not set")
-    best = suggest_model(prompt, GROQ_MODELS, provider="groq", reserve_output=max_tokens)
-    chain = [best] if best else GROQ_MODELS
+    chain = [m for m in GROQ_MODELS if fits_in_context(prompt, m, "groq", max_tokens)] or GROQ_MODELS
     last_err = None
     for model in chain:
         try:
@@ -104,8 +91,8 @@ def _call_openrouter(prompt, temperature=0.7, max_tokens=12288, timeout=300):
     key = os.environ.get("OPENROUTER_API_KEY")
     if not key:
         raise RuntimeError("OPENROUTER_API_KEY not set")
-    best = suggest_model(prompt, OPENROUTER_FREE, provider="openrouter", reserve_output=max_tokens)
-    chain = [best] if best else OPENROUTER_FREE
+    live = openrouter_free_models()
+    chain = [m for m in live if fits_in_context(prompt, m, "openrouter", max_tokens)] or live
     last_err = None
     for model in chain:
         try:
@@ -142,8 +129,7 @@ def _call_gemini_review(prompt, temperature=0.3, max_tokens=16384, timeout=300):
     key = os.environ.get("GEMINI_API_KEY")
     if not key:
         raise RuntimeError("GEMINI_API_KEY not set")
-    best = suggest_model(prompt, GEMINI_REVIEW, provider="gemini", reserve_output=max_tokens)
-    chain = [best] if best else GEMINI_REVIEW
+    chain = [m for m in GEMINI_REVIEW if fits_in_context(prompt, m, "gemini", max_tokens)] or GEMINI_REVIEW
     last_err = None
     for model in chain:
         try:
@@ -479,7 +465,11 @@ def run_full_pipeline(topic, trending_context=None):
     models_used = []
 
     # ── Stage 1: Script writer ──
-    script, m1 = stage1_write_script(topic, trending_context)
+    script, m1 = load_stage("stage1", topic)
+    if not script:
+        script, m1 = stage1_write_script(topic, trending_context)
+        if script.get("chapters"):
+            save_stage("stage1", topic, script, m1)
     models_used.append(m1)
     title = script["title"]
     ch_data = script["chapters"]
@@ -499,7 +489,11 @@ def run_full_pipeline(topic, trending_context=None):
         ch_data = script.get("chapters", ch_data)
 
     # ── Stage 2: Scene breakdown ──
-    chapters, m2 = stage2_breakdown_scenes(ch_data)
+    chapters, m2 = load_stage("stage2", topic)
+    if not chapters:
+        chapters, m2 = stage2_breakdown_scenes(ch_data)
+        if sum(len(c.get("scenes", [])) for c in chapters) >= 15:
+            save_stage("stage2", topic, chapters, m2)
     models_used.append(m2)
     total_scenes = sum(len(c.get("scenes", [])) for c in chapters)
     if total_scenes < 15:
@@ -510,7 +504,12 @@ def run_full_pipeline(topic, trending_context=None):
     rev2 = _run_reviewers(title, hook_placeholder, chapters, "Stage 2")
 
     # ── Stage 3: Enhance scenes ──
-    chapters, m3 = stage3_enhance_scenes(chapters)
+    enhanced, m3 = load_stage("stage3", topic)
+    if enhanced:
+        chapters = enhanced
+    else:
+        chapters, m3 = stage3_enhance_scenes(chapters)
+        save_stage("stage3", topic, chapters, m3)
     models_used.append(m3)
 
     # Review Stage 3 (visual feasibility)
@@ -534,7 +533,10 @@ def run_full_pipeline(topic, trending_context=None):
         print(f"  Visual review error: {e}", flush=True)
 
     # ── Stage 4: Hook & retention ──
-    retention, m4 = stage4_hook_retention(title, chapters, key_points)
+    retention, m4 = load_stage("stage4", topic)
+    if not retention:
+        retention, m4 = stage4_hook_retention(title, chapters, key_points)
+        save_stage("stage4", topic, retention, m4)
     models_used.append(m4)
     hook = retention.get("hook", "")[:120] or "Watch till the end"
     comment = retention.get("comment_prompt", "What did you think?")[:300]
@@ -567,7 +569,10 @@ def run_full_pipeline(topic, trending_context=None):
     raw_plan = _fix_from_review(raw_plan, final_review[1] if len(final_review) > 1 else {})
 
     # ── Stage 5: Gemini final review ──
-    polished, m5 = stage5_final_review(raw_plan)
+    polished, m5 = load_stage("stage5", topic)
+    if not polished:
+        polished, m5 = stage5_final_review(raw_plan)
+        save_stage("stage5", topic, polished, m5)
     models_used.append(m5)
 
     # Final verification
@@ -585,3 +590,4 @@ def run_full_pipeline(topic, trending_context=None):
     print(f"  Multi-LLM pipeline: {final_ch} ch, {final_sc} scenes", flush=True)
     print(f"  Chain: {llm_chain}", flush=True)
     return polished, llm_chain, models_used
+

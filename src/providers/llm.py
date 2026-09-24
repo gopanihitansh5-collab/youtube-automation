@@ -5,7 +5,7 @@ randomises format, voice, tone, hook style, CTA, and scene count before
 any provider generates content.
 
 Order:
-  1. Groq               (GROQ_API_KEY -- Llama 3.3 70B at 500+ tok/s, free tier)
+  1. Groq               (GROQ_API_KEY -- GPT-OSS 120B/20B, free tier)
   2. Gemini Flash (REST)   (GEMINI_API_KEY, free tier)
   3. OpenRouter            (OPENROUTER_API_KEY -- ":free" models ONLY, $0 cost)
   4. Hugging Face router   (HF_TOKEN, free tier, OpenAI-compatible chat API)
@@ -37,27 +37,24 @@ HF_MODELS = [
 
 # OpenRouter: ONLY ":free" models -- these cost $0.
 OPENROUTER_MODELS = [
-    "deepseek/deepseek-chat-v3-0324:free",
-    "meta-llama/llama-3.3-70b-instruct:free",
-    "google/gemma-3-27b-it:free",
-    "qwen/qwen-2.5-72b-instruct:free",
-    "mistralai/mistral-7b-instruct:free",
+    "nvidia/nemotron-3-super-120b-a12b:free",
+    "google/gemma-4-31b-it:free",
+    "qwen/qwen3.8-27b:free",
 ]
 
 GROQ_MODELS = [
-    "llama-3.3-70b-versatile",
-    "llama-4-scout-17b-16e-instruct",
-    "llama-3.1-8b-instant",
-    "qwen-2.5-32b",
+    # Groq Llama models are Enterprise-only now (404 on free keys).
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
 ]
 
 GEMINI_MODELS = [
     "gemini-3.5-flash",
     "gemini-3.1-flash-lite",
-    "gemini-3-flash",
+    "gemini-3-flash-preview",
     "gemini-2.5-flash",
     "gemini-2.5-pro",
-    "gemini-2.0-flash",
+    "gemini-flash-latest",
 ]
 
 # Temperature range -- randomised per video so outputs vary even from the
@@ -265,7 +262,7 @@ def generate_plan(topic, extra_context=None):
 
     chain = []
     if os.environ.get("GROQ_API_KEY"):
-        chain.append(("groq-llama3.3-70b", lambda: _groq(topic, dyn_prompt, temp)))
+        chain.append(("groq-gpt-oss", lambda: _groq(topic, dyn_prompt, temp)))
     if os.environ.get("GEMINI_API_KEY"):
         chain.append(("gemini", lambda: _gemini(topic, dyn_prompt, temp)))
     if os.environ.get("OPENROUTER_API_KEY"):
@@ -285,3 +282,4 @@ def generate_plan(topic, extra_context=None):
             print(f"  script provider {name} unavailable: {e}")
     plan = build_offline_script(topic, meta)
     return plan, "offline-builder", meta
+
