@@ -1,0 +1,41 @@
+name: One-off series batch upload (AI Agents Shorts)
+
+# One-off: fires when this file is pushed to main. Removed after success.
+# workflow_dispatch allows a manual resume after a quota reset.
+on:
+  push:
+    paths:
+      - '.github/workflows/series-upload.yml'
+  workflow_dispatch: {}
+
+concurrency:
+  group: series-upload
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install google-auth google-api-python-client requests
+      - name: Batch upload series
+        env:
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+        run: python scripts/series_upload.py
+      - name: Upload results artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: series-upload-results
+          path: output/series-results.json
+          if-no-files-found: warn
+          retention-days: 7
