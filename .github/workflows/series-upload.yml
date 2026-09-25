@@ -2,10 +2,12 @@ name: One-off series batch upload (AI Agents Shorts)
 
 # One-off: fires when this file is pushed to main. Removed after success.
 # workflow_dispatch allows a manual resume after a quota reset.
+# Progress is cached between runs so a resume skips completed uploads.
 on:
   push:
     paths:
       - '.github/workflows/series-upload.yml'
+      - 'scripts/series_upload.py'
   workflow_dispatch: {}
 
 concurrency:
@@ -14,6 +16,7 @@ concurrency:
 
 permissions:
   contents: read
+  actions: write  # cache save for resumable progress
 
 jobs:
   upload:
@@ -25,12 +28,24 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install google-auth google-api-python-client requests
+      - name: Restore upload progress
+        uses: actions/cache/restore@v4
+        with:
+          path: output/series-results.json
+          key: series-progress-r${{ github.run_id }}
+          restore-keys: series-progress-r
       - name: Batch upload series
         env:
           YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
           YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
           YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
         run: python scripts/series_upload.py
+      - name: Save upload progress
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: output/series-results.json
+          key: series-progress-r${{ github.run_id }}
       - name: Upload results artifact
         if: always()
         uses: actions/upload-artifact@v4

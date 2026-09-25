@@ -1,15 +1,18 @@
 """One-off batch upload: 'How AI Agents Actually Work' series (14 videos).
 
-Runs once in GitHub Actions; workflow + this file are removed after success.
+Runs in GitHub Actions; workflow + this file are removed after success.
 Auth: YT_CLIENT_ID / YT_CLIENT_SECRET / YT_REFRESH_TOKEN repo secrets, same
-refresh-token pattern as the daily pipeline (src/youtube_upload.py). Secret
-values are never printed. Idempotent: re-runs skip videos already on the
-channel (exact title match) and playlist items already added, and continue
-the hourly publishAt chain from whatever is already scheduled.
+refresh-token pattern as the daily pipeline (src/youtube_upload.py). The
+stored refresh token carries ONLY the youtube.upload scope (confirmed: a
+refresh requesting upload+force-ssl fails with invalid_scope), so this
+script deliberately makes NO read or playlist API calls - those need
+youtube.force-ssl. videos.insert responses themselves provide the upload
+status + publishAt echo used for verification.
 
-Order: probe playlist scope -> create/reuse playlist -> landscape final
-(public now) -> Shorts 1-12 (publishAt hourly, Part 1 ASAP) -> vertical
-final Short (slot 13) -> add all 14 to playlist -> verify statuses.
+Resumable: after every insert, progress is written to
+output/series-results.json; the workflow caches that file (actions/cache)
+so a re-run after a quota reset skips completed videos and continues the
+hourly publishAt chain. Secrets are never printed.
 """
 import json
 import os
@@ -24,14 +27,11 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 
-SCOPES = [
-    "https://www.googleapis.com/auth/youtube.upload",
-    "https://www.googleapis.com/auth/youtube.force-ssl",
-]
+UPLOAD_SCOPE = ["https://www.googleapis.com/auth/youtube.upload"]
+CHANNEL_URL = "https://www.youtube.com/@The4FutureLens"
 WORK = "/tmp/series"
 RESULTS = "output/series-results.json"
 PLAYLIST_TITLE = "How AI Agents Actually Work | 12-Part AI Explainer"
-PLAYLIST_DESC = "12 quick lessons, each about 10 seconds, on goals, reasoning, tools, actions, observation, memory and the difference between an AI agent and a chatbot. Watch the full two-minute explainer too."
 VIDEOS = [
   {
     "kind": "part",
@@ -243,9 +243,27 @@ def service():
         client_id=os.environ["YT_CLIENT_ID"],
         client_secret=os.environ["YT_CLIENT_SECRET"],
         token_uri="https://oauth2.googleapis.com/token",
-        scopes=SCOPES,
+        scopes=UPLOAD_SCOPE,
     )
     return build("youtube", "v3", credentials=creds, cache_discovery=False)
+
+
+def load_progress():
+    if os.path.exists(RESULTS):
+        try:
+            with open(RESULTS) as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {"videos": [], "playlist_url": None,
+            "playlist_status": "deferred: refresh token has upload-only scope "
+                               "(force-ssl needed); create playlist after re-auth"}
+
+
+def save(results):
+    os.makedirs("output", exist_ok=True)
+    with open(RESULTS, "w") as f:
+        json.dump(results, f, indent=2)
 
 
 def download_all():
@@ -285,39 +303,6 @@ def ist_hour_floor(now):
     return (t + timedelta(hours=1)).replace(minute=30)
 
 
-def probe_playlist_scope(yt):
-    try:
-        yt.playlists().list(part="snippet", mine=True, maxResults=1).execute()
-        return True
-    except HttpError as e:
-        log(f"playlist scope probe failed: {e.status_code} {e.error_details or e}")
-        return False
-
-
-def existing_uploads(yt):
-    ch = yt.channels().list(part="contentDetails", mine=True).execute()
-    up = ch["items"][0]["contentDetails"]["relatedPlaylists"]["uploads"]
-    found = {}
-    page = None
-    while True:
-        resp = yt.playlistItems().list(part="snippet", playlistId=up,
-                                       maxResults=50, pageToken=page).execute()
-        for it in resp.get("items", []):
-            t = it["snippet"]["title"]
-            if t not in found:
-                found[t] = it["snippet"]["resourceId"]["videoId"]
-        page = resp.get("nextPageToken")
-        if not page:
-            break
-    pub = {}
-    ids = list(found.values())
-    for i in range(0, len(ids), 50):
-        resp = yt.videos().list(part="status", id=",".join(ids[i:i + 50])).execute()
-        for it in resp.get("items", []):
-            pub[it["id"]] = it["status"].get("publishAt")
-    return {t: (vid, pub.get(vid)) for t, vid in found.items()}
-
-
 def upload_one(yt, v, description, publish_at=None):
     status = {"selfDeclaredMadeForKids": False}
     if publish_at:
@@ -343,70 +328,17 @@ def upload_one(yt, v, description, publish_at=None):
         except Exception as e:
             log(f"  chunk retry ({type(e).__name__})")
             time.sleep(5)
-    return resp["id"]
-
-
-def verify(yt, video_id, tries=12, delay=10):
-    st = {}
-    for _ in range(tries):
-        r = yt.videos().list(part="status", id=video_id).execute()
-        if not r.get("items"):
-            time.sleep(delay)
-            continue
-        st = r["items"][0]["status"]
-        if st.get("uploadStatus") in ("processed", "failed", "rejected"):
-            return st
-        time.sleep(delay)
-    return st
-
-
-def ensure_playlist(yt):
-    page = None
-    pl_id = None
-    while True:
-        resp = yt.playlists().list(part="snippet", mine=True, maxResults=50,
-                                   pageToken=page).execute()
-        for it in resp.get("items", []):
-            if it["snippet"]["title"] == PLAYLIST_TITLE:
-                pl_id = it["id"]
-        page = resp.get("nextPageToken")
-        if pl_id or not page:
-            break
-    if not pl_id:
-        resp = yt.playlists().insert(part="snippet,status", body={
-            "snippet": {"title": PLAYLIST_TITLE, "description": PLAYLIST_DESC},
-            "status": {"privacyStatus": "public"},
-        }).execute()
-        pl_id = resp["id"]
-        log(f"playlist created: {pl_id}")
-    else:
-        log(f"playlist exists: {pl_id}")
-    return pl_id
-
-
-def fill_playlist(yt, pl_id, ordered_ids):
-    have = set()
-    page = None
-    while True:
-        resp = yt.playlistItems().list(part="snippet", playlistId=pl_id,
-                                       maxResults=50, pageToken=page).execute()
-        for it in resp.get("items", []):
-            have.add(it["snippet"]["resourceId"]["videoId"])
-        page = resp.get("nextPageToken")
-        if not page:
-            break
-    for vid in ordered_ids:
-        if vid in have:
-            continue
-        yt.playlistItems().insert(part="snippet", body={
-            "snippet": {"playlistId": pl_id,
-                        "resourceId": {"kind": "youtube#video", "videoId": vid}},
-        }).execute()
-        log(f"  playlist += {vid}")
+    return resp
 
 
 def is_quota(e):
     return e.status_code == 403 and "quota" in str(e.error_details or e).lower()
+
+
+def substitute(desc, land_url):
+    return (desc.replace("{FULL_VIDEO_URL}", land_url)
+                .replace("{LANDSCAPE_VIDEO_URL}", land_url)
+                .replace("{PLAYLIST_URL}", CHANNEL_URL))
 
 
 def main():
@@ -414,66 +346,55 @@ def main():
         if not os.environ.get(k):
             log(f"MISSING SECRET: {k}")
             sys.exit(1)
-    os.makedirs("output", exist_ok=True)
-    results = {"videos": [], "playlist_url": None}
     yt = service()
-
-    if not probe_playlist_scope(yt):
-        log("PLAYLIST_SCOPE_MISSING - halting before any upload")
-        results["playlist_error"] = "insufficient scope for playlists"
-        with open(RESULTS, "w") as f:
-            json.dump(results, f, indent=2)
-        sys.exit(3)
+    results = load_progress()
+    done = {e["title"]: e for e in results["videos"] if e.get("video_id")}
+    if done:
+        log(f"resuming: {len(done)} videos already uploaded")
 
     download_all()
 
-    pl_id = ensure_playlist(yt)
-    pl_url = f"https://www.youtube.com/playlist?list={pl_id}"
-    results["playlist_url"] = pl_url
-
-    have = existing_uploads(yt)
     parts = [v for v in VIDEOS if v["kind"] == "part"]
     final = [v for v in VIDEOS if v["kind"] == "final"][0]
+    quota_stop = False
 
     # 1) landscape final first (public immediately) - Shorts link to it
-    land_id = None
-    if final["title"] in have:
-        land_id = have[final["title"]][0]
-        log(f"final exists: {land_id}")
-        results["videos"].append({"file": final["file"], "title": final["title"],
-                                  "video_id": land_id,
-                                  "url": f"https://youtu.be/{land_id}",
-                                  "skipped": "already uploaded"})
-    land_url = f"https://youtu.be/{land_id}" if land_id else None
-
-    quota_stop = False
-    if land_id is None:
-        desc = final["description"].replace("{PLAYLIST_URL}", pl_url)
+    land_url = None
+    if final["title"] in done:
+        land_url = done[final["title"]]["url"]
+        log(f"final exists: {land_url}")
+    else:
+        desc = substitute(final["description"], "")
         try:
             log(f"upload FINAL: {final['title']} (public)")
-            land_id = upload_one(yt, final, desc)
-            land_url = f"https://youtu.be/{land_id}"
-            st = verify(yt, land_id)
+            resp = upload_one(yt, final, desc)
+            vid = resp["id"]
+            land_url = f"https://youtu.be/{vid}"
             results["videos"].append({
-                "file": final["file"], "title": final["title"],
-                "video_id": land_id, "url": land_url,
-                "privacyStatus": st.get("privacyStatus"),
-                "uploadStatus": st.get("uploadStatus")})
-            log(f"  ok: {land_url} status={st.get('uploadStatus')}")
+                "file": final["file"], "title": final["title"], "kind": "final",
+                "video_id": vid, "url": land_url,
+                "privacyStatus": resp.get("status", {}).get("privacyStatus"),
+                "uploadStatus": resp.get("status", {}).get("uploadStatus")})
+            save(results)
+            log(f"  ok: {land_url} status={resp.get('status', {}).get('uploadStatus')}")
         except HttpError as e:
             log(f"FINAL UPLOAD FAILED: {e.status_code} {e.error_details or e}")
             results["videos"].append({"file": final["file"], "title": final["title"],
+                                      "kind": "final",
                                       "error": f"{e.status_code} {e.error_details or e}"})
+            save(results)
             if is_quota(e):
                 quota_stop = True
+            else:
+                sys.exit(1)
 
-    # 2) schedule chain for parts (IST-aligned, hourly)
+    # 2) hourly schedule chain (IST-aligned), continuing prior slots on resume
     floor = ist_hour_floor(datetime.now(timezone.utc))
     slots = {}
     prev = None
     for v in parts:
-        if v["title"] in have and have[v["title"]][1]:
-            prev = parse_ts(have[v["title"]][1])
+        if v["title"] in done and done[v["title"]].get("publishAt"):
+            prev = parse_ts(done[v["title"]]["publishAt"])
             continue
         slot = prev + timedelta(hours=1) if prev else floor
         if slot < floor:
@@ -481,86 +402,66 @@ def main():
         slots[v["title"]] = slot
         prev = slot
 
-    # 3) parts in order
+    # 3) parts in order (Shorts 1-12, then vertical final as slot 13)
     for v in parts:
-        entry = {"file": v["file"], "title": v["title"], "part": v["part"]}
-        if v["title"] in have:
-            vid, pub = have[v["title"]]
-            entry.update(video_id=vid, url=f"https://youtu.be/{vid}",
-                         skipped="already uploaded", publishAt=pub)
-            results["videos"].append(entry)
-            log(f"skip (exists): Part {v['part']} -> {vid}")
+        if v["title"] in done:
+            log(f"skip (exists): Part {v['part']}")
             continue
+        entry = {"file": v["file"], "title": v["title"], "kind": "part",
+                 "part": v["part"]}
         if quota_stop or land_url is None:
             entry["skipped"] = "quota exhausted" if quota_stop else "final missing"
             results["videos"].append(entry)
+            save(results)
             continue
-        desc = (v["description"]
-                .replace("{FULL_VIDEO_URL}", land_url)
-                .replace("{LANDSCAPE_VIDEO_URL}", land_url)
-                .replace("{PLAYLIST_URL}", pl_url))
+        desc = substitute(v["description"], land_url)
         if "{" in desc:
             entry["error"] = "unresolved placeholder in description"
             results["videos"].append(entry)
+            save(results)
             continue
         pa = fmt_ts(slots[v["title"]])
         try:
             log(f"upload Part {v['part']}: publishAt={pa}")
-            vid = upload_one(yt, v, desc, publish_at=pa)
+            resp = upload_one(yt, v, desc, publish_at=pa)
         except HttpError as e:
             log(f"PART {v['part']} FAILED: {e.status_code} {e.error_details or e}")
             entry["error"] = f"{e.status_code} {e.error_details or e}"
             results["videos"].append(entry)
+            save(results)
             if is_quota(e):
                 quota_stop = True
             continue
-        st = verify(yt, vid)
+        vid = resp["id"]
         entry.update(video_id=vid, url=f"https://youtu.be/{vid}",
-                     publishAt=st.get("publishAt") or pa,
-                     privacyStatus=st.get("privacyStatus"),
-                     uploadStatus=st.get("uploadStatus"))
+                     publishAt=resp.get("status", {}).get("publishAt") or pa,
+                     privacyStatus=resp.get("status", {}).get("privacyStatus"),
+                     uploadStatus=resp.get("status", {}).get("uploadStatus"))
         results["videos"].append(entry)
-        log(f"  ok: https://youtu.be/{vid} status={st.get('uploadStatus')}")
+        save(results)
+        log(f"  ok: https://youtu.be/{vid} status={entry['uploadStatus']}")
 
-    # 4) playlist membership: Shorts 1-12, landscape final, vertical final
-    id_by_title = {}
-    for e in results["videos"]:
-        if e.get("video_id"):
-            id_by_title[e["title"]] = e["video_id"]
-    shorts12 = [v for v in parts if v["part"] <= 12]
-    vertical = [v for v in parts if v["part"] == 13]
-    ordered = [id_by_title[v["title"]] for v in shorts12 + [final] + vertical
-               if v["title"] in id_by_title]
-    try:
-        fill_playlist(yt, pl_id, ordered)
-        results["playlist_filled"] = len(ordered)
-    except HttpError as e:
-        log(f"PLAYLIST FILL FAILED: {e.status_code} {e.error_details or e}")
-        results["playlist_error"] = f"{e.status_code} {e.error_details or e}"
-
-    with open(RESULTS, "w") as f:
-        json.dump(results, f, indent=2)
-
+    save(results)
     summary = ["## Series upload results", ""]
     for e in results["videos"]:
         line = f"- {e.get('title', e['file'])}"
         if e.get("url"):
             line += f" -> {e['url']}"
         if e.get("publishAt"):
-            line += f" (publishes {e['publishAt']})"
+            line += f" (publishes {e['publishAt']}Z)"
         if e.get("error"):
             line += f" ERROR {e['error']}"
         if e.get("skipped"):
             line += f" [{e['skipped']}]"
         summary.append(line)
     summary.append("")
-    summary.append(f"Playlist: {pl_url}")
+    summary.append("Playlist: " + results["playlist_status"])
     with open(os.environ.get("GITHUB_STEP_SUMMARY", "/dev/null"), "a") as f:
         f.write("\n".join(summary) + "\n")
-
     log(json.dumps(results, indent=2)[:6000])
+
     fails = [e for e in results["videos"] if e.get("error")]
-    pending = [e for e in results["videos"] if e.get("skipped") == "quota exhausted"]
+    pending = [e for e in results["videos"] if e.get("skipped")]
     if fails and not quota_stop:
         sys.exit(1)
     if quota_stop or pending:
