@@ -1,13 +1,11 @@
-"""Read-only bound Sheet inventory. Row contents are private artifact only."""
+"""Read-only summary. Never print, save, or upload row contents."""
 import collections
 import json
 import os
-from pathlib import Path
 
 
 def build_inventory(book):
     summaries = []
-    snapshots = []
     for ws in book.worksheets():
         rows = ws.get_all_values()
         header = rows[0] if rows else []
@@ -23,8 +21,7 @@ def build_inventory(book):
         summaries.append({'worksheet_title': ws.title, 'allocated_row_count': ws.row_count,
                           'populated_data_row_count': len(data), 'headers': header,
                           'status_counts': counts('status'), 'type_counts': counts('type')})
-        snapshots.append({'worksheet_title': ws.title, 'rows': rows})
-    return {'status': 'success', 'title': book.title, 'worksheets': summaries}, snapshots
+    return {'status': 'success', 'title': book.title, 'worksheets': summaries}
 
 
 def main():
@@ -32,13 +29,7 @@ def main():
         import gspread
         gc = gspread.service_account_from_dict(json.loads(os.environ['GOOGLE_SERVICE_ACCOUNT_JSON']))
         book = gc.open_by_key(os.environ['SHEET_ID'].strip())
-        summary, snapshots = build_inventory(book)
-        path = Path('private_sheet_snapshot')
-        path.mkdir(mode=0o700, exist_ok=True)
-        target = path / 'bound_sheet_snapshot.json'
-        target.write_text(json.dumps({'title': book.title, 'worksheets': snapshots}, ensure_ascii=False), encoding='utf-8')
-        target.chmod(0o600)
-        (path / 'inventory.json').write_text(json.dumps(summary, ensure_ascii=False), encoding='utf-8')
+        summary = build_inventory(book)
         print(json.dumps(summary, sort_keys=True))
     except Exception:
         print(json.dumps({'status':'error','category':'sheet_inventory_unavailable'}))

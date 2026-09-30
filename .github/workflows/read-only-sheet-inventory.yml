@@ -18,10 +18,3 @@ jobs:
           SHEET_ID: ${{ secrets.SHEET_ID }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
         run: python scripts/probe_bound_sheet_inventory.py
-      - name: Preserve private Sheet snapshot
-        uses: actions/upload-artifact@v4
-        with:
-          name: private-bound-sheet-snapshot
-          path: private_sheet_snapshot/
-          if-no-files-found: error
-          retention-days: 7
