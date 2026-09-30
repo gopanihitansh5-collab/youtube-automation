@@ -27,17 +27,12 @@ def _worksheet():
     import gspread
     info = json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"])
     gc = gspread.service_account_from_dict(info)
-    return gc.open_by_key(os.environ["SHEET_ID"]).sheet1
+    return gc.open_by_key(os.environ["SHEET_ID"].strip()).sheet1
 
 
 def _from_sheet():
-    ws = _worksheet()
-    for i, rec in enumerate(ws.get_all_records()):
-        status = str(rec.get("status", "")).strip().lower()
-        if status in ("", "pending", "todo", "queue", "queued"):
-            rec = {str(k).lower(): v for k, v in rec.items()}
-            return {"row_idx": i + 2, "source": "google-sheet", **rec}
-    return None  # sheet reachable but everything is done
+    from .episode_queue import select_episode
+    return select_episode(_worksheet().get_all_values())
 
 
 def _from_csv():
@@ -52,24 +47,19 @@ def _from_csv():
 
 
 def get_next_item():
-    """Return an item dict {topic, voice, privacy, source, row_idx} — or None
-    only when the Google Sheet is reachable and every row is already done."""
-    if os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON") and os.environ.get("SHEET_ID"):
-        try:
-            item = _from_sheet()
-            if item is None:
-                print("Sheet reachable: all rows done — nothing to post today.")
-                return None
-            return item
-        except Exception as e:
-            print(f"Google Sheet unavailable ({e}) -> falling back to topics.csv")
+    """Managed Shorts only. Never fall back to an unscheduled source."""
+    from .episode_queue import QueueBlocked
+    if not (os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON") and os.environ.get("SHEET_ID")):
+        raise QueueBlocked('sheet_credentials_missing')
     try:
-        return _from_csv()
-    except Exception as e:
-        print(f"topics.csv unavailable ({e}) -> using built-in topic list")
-        pick = FALLBACK_TOPICS[
-            datetime.date.today().timetuple().tm_yday % len(FALLBACK_TOPICS)]
-        return {"row_idx": None, "source": "built-in", **pick}
+        item = _from_sheet()
+    except QueueBlocked:
+        raise
+    except Exception:
+        raise QueueBlocked('sheet_read_failed') from None
+    if item is None:
+        print("No due verified managed Short; nothing to publish.")
+    return item
 
 
 def _write_fields(item, updates):

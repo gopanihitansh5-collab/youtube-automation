@@ -81,6 +81,10 @@ def _from_sheet_long():
     """Get next undone topic from sheet, filtering for long-form type if column exists."""
     ws = sheets._worksheet()
     for i, rec in enumerate(ws.get_all_records()):
+        rec = {str(k).strip().lower(): v for k, v in rec.items()}
+        # Managed episodes are a separate immutable-master Short lane.
+        if str(rec.get("episode_id", "")).strip() or str(rec.get("type", "")).strip().lower() in ("short", "shorts"):
+            continue
         status = str(rec.get("status", "")).strip().lower()
         if status not in ("", "pending", "todo", "queue", "queued"):
             continue

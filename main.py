@@ -83,6 +83,11 @@ def main():
     item = sheets.get_next_item()
     if item is None:
         return 0
+    if item.get("managed_episode"):
+        # No generation fallback. Enable only after private master transport,
+        # exact channel binding and durable upload reconciliation are grounded.
+        from src.episode_queue import QueueBlocked
+        raise QueueBlocked('managed_master_upload_not_configured')
     topic = str(item.get("topic", "")).strip()
     voice_name = str(item.get("voice") or "en-US-AriaNeural").strip()
     privacy = str(item.get("privacy") or "unlisted").strip().lower()
