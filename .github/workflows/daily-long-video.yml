@@ -70,6 +70,12 @@ jobs:
           YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
           YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
         run: python scripts/probe_youtube_oauth.py
+      - name: Read-only Shorts Sheet binding proof (private preproduction)
+        if: github.event_name == 'workflow_dispatch' && inputs.preproduction
+        env:
+          SHEET_ID: ${{ secrets.SHEET_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: python scripts/probe_sheet_binding.py
       - name: Generate long-form video
         env:
           SKIP_UPLOAD: ${{ github.event_name == 'workflow_dispatch' && inputs.preproduction && '1' || '0' }}
