@@ -2,10 +2,6 @@ name: Append held managed Shorts
 on:
   workflow_dispatch:
     inputs:
-      episodes_json:
-        description: '1-3 approved inert episode records. Inputs on this public repository are not a secret channel.'
-        required: true
-        type: string
       execute:
         description: 'Append production_hold only after exact record review. False = dry run.'
         default: false
@@ -28,7 +24,7 @@ jobs:
       - run: python -m pip install gspread
       - name: Validate or append held records
         env:
-          HELD_EPISODES_JSON: ${{ inputs.episodes_json }}
+          HELD_EPISODES_JSON: ${{ secrets.HELD_EPISODES_JSON }}
           EXECUTE_HELD_APPEND: ${{ inputs.execute }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           SHEET_ID: ${{ secrets.SHEET_ID }}
