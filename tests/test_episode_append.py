@@ -6,7 +6,7 @@ from src.episode_append import *
 
 class AppendTests(unittest.TestCase):
  def setUp(self):
-  self.r={'episode_id':'e1','topic':'Exact topic','publish_at':'2026-10-02T12:00:00+05:30','timezone':'Asia/Calcutta','voice':'af_heart','source_evidence':['https://example.invalid/source'],'editorial_caveats':'Check current source'}
+  self.r={'episode_id':'e1','topic':'Exact topic','publish_at':'2026-10-02T12:00:00+05:30','timezone':'Asia/Calcutta','voice':'af_heart','source_urls':['https://example.invalid/source'],'caveats_source_notes':'Check current source','privacy':'private','status':'production_hold','script_title':'Title','script_tags':'tag','script_hook':'hook','master_artifact_id':None,'master_url':None}
   self.v=[list(BASE_HEADERS),['old','voice','public','done','url','date','title','desc','tag','hook']]
  def test_held_empty_master_and_schema_preserved(self):
   h,rows,n=plan_append(self.v,[self.r]);self.assertEqual(h[:10],list(BASE_HEADERS));r=dict(zip(h,rows[0]));self.assertEqual(r['status'],'production_hold');self.assertEqual(r['type'],'short');self.assertEqual(r['manifest_ref'],'')

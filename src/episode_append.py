@@ -3,8 +3,8 @@ from datetime import datetime
 import json
 from .episode_queue import BASE_HEADERS, MANAGED_HEADERS, QueueBlocked, SAFE_ID, publish_time
 
-EXTRA_HEADERS = MANAGED_HEADERS + ('youtube_video_id','upload_attempt_id','upload_started_at','source_evidence','editorial_caveats')
-FIELDS = {'episode_id','topic','publish_at','timezone','voice','source_evidence','editorial_caveats'}
+EXTRA_HEADERS = MANAGED_HEADERS + ('youtube_video_id','upload_attempt_id','upload_started_at','source_evidence','editorial_caveats','slot_provenance')
+FIELDS = {'episode_id','topic','publish_at','timezone','voice','privacy','status','script_title','script_tags','script_hook','caveats_source_notes','source_urls','master_artifact_id','master_url'}
 
 
 def validate_records(records):
@@ -14,21 +14,25 @@ def validate_records(records):
     for record in records:
         if not isinstance(record,dict) or set(record) != FIELDS:
             raise QueueBlocked('append_fields_invalid')
-        if not all(isinstance(record[k],str) for k in ('episode_id','topic','publish_at','timezone','voice','editorial_caveats')):
+        if not all(isinstance(record[k],str) for k in ('episode_id','topic','publish_at','timezone','voice','privacy','status','script_title','script_tags','script_hook','caveats_source_notes')):
             raise QueueBlocked('append_field_type_invalid')
         eid=record['episode_id']
         if not SAFE_ID.fullmatch(eid) or eid in ids:
             raise QueueBlocked('append_episode_id_invalid')
         ids.add(eid)
-        if not record['topic'].strip() or len(record['topic']) > 1000 or len(record['editorial_caveats']) > 4000 or record['voice'] != 'af_heart':
+        if not record['topic'].strip() or len(record['topic']) > 1000 or len(record['caveats_source_notes']) > 4000 or record['voice'] != 'af_heart':
             raise QueueBlocked('append_content_invalid')
         publish_time(record['publish_at'],record['timezone'])
-        if not isinstance(record['source_evidence'],list) or not record['source_evidence'] or not all(isinstance(s,str) and 0 < len(s) <= 1500 for s in record['source_evidence']):
+        if not isinstance(record['source_urls'],list) or not record['source_urls'] or not all(isinstance(s,str) and 0 < len(s) <= 1500 for s in record['source_urls']):
             raise QueueBlocked('append_sources_invalid')
-        row={'topic':record['topic'],'voice':'af_heart','privacy':'public','status':'production_hold',
+        if record['privacy'] != 'private' or record['status'] != 'production_hold' or record['master_artifact_id'] is not None or record['master_url'] is not None:
+            raise QueueBlocked('append_hold_state_invalid')
+        row={'topic':record['topic'],'voice':'af_heart','privacy':'private','status':'production_hold',
              'episode_id':eid,'type':'short','publish_at':record['publish_at'],'timezone':record['timezone'],
-             'source_evidence':json.dumps(record['source_evidence'],ensure_ascii=False,separators=(',',':')),
-             'editorial_caveats':record['editorial_caveats']}
+             'source_evidence':json.dumps(record['source_urls'],ensure_ascii=False,separators=(',',':')),
+             'editorial_caveats':record['caveats_source_notes'],
+             'script_title':record['script_title'],'script_tags':record['script_tags'],'script_hook':record['script_hook'],
+             'slot_provenance':'proposed_agent_slot_unconfirmed'}
         rows.append(row)
     return rows
 
@@ -53,7 +57,7 @@ def plan_append(values, records):
         old=existing.get(row['episode_id'])
         if old:
             # Do not reset state or overwrite an episode that has progressed.
-            for key in ('topic','voice','privacy','type','publish_at','timezone','source_evidence','editorial_caveats'):
+            for key in ('topic','voice','privacy','type','publish_at','timezone','source_evidence','editorial_caveats','slot_provenance'):
                 if old.get(key,'') != row[key]:raise QueueBlocked('append_existing_record_conflict')
             same+=1
         else:append.append([row.get(h,'') for h in new_headers])
