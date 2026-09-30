@@ -45,3 +45,13 @@ class SafetyTests(unittest.TestCase):
         s=(ROOT/'.github/workflows/daily-long-video.yml').read_text();self.assertIn('default: true',s);self.assertIn('SKIP_UPLOAD:',s);self.assertIn('output_long/failure.json',s)
     def test_single_inference_lock(self):
         s=(ROOT/'src/providers/voice.py').read_text();self.assertIn('with _KOKORO_INFERENCE_LOCK:',s)
+
+class OAuthProbeTests(unittest.TestCase):
+    def test_safe_scope_probe(self):
+        spec=importlib.util.spec_from_file_location('probe',ROOT/'scripts/probe_youtube_oauth.py');mod=importlib.util.module_from_spec(spec);spec.loader.exec_module(mod)
+        from unittest.mock import MagicMock
+        session=MagicMock();r1=MagicMock(status_code=200);r1.json.return_value={'access_token':'DO_NOT_PRINT','scope':mod.SCOPES['upload']};r2=MagicMock(status_code=400);r2.json.return_value={'error':'invalid_grant','error_description':'SECRET_DESCRIPTION'};session.post.side_effect=[r1,r2]
+        result=mod.probe(session,{'YT_CLIENT_ID':'CID','YT_CLIENT_SECRET':'SECRET','YT_REFRESH_TOKEN':'REFRESH'})
+        self.assertEqual(result[0]['status'],'success');self.assertEqual(result[1]['category'],'invalid_grant')
+        self.assertNotIn('DO_NOT_PRINT',str(result));self.assertNotIn('SECRET_DESCRIPTION',str(result));self.assertEqual(session.post.call_count,2)
+        self.assertEqual(session.post.call_args_list[0].kwargs['data']['scope'],mod.SCOPES['upload']);self.assertEqual(session.post.call_args_list[1].kwargs['data']['scope'],mod.SCOPES['readonly'])

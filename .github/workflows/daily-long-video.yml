@@ -63,6 +63,13 @@ jobs:
           else
             echo "No cached script — full pipeline run"
           fi
+      - name: Read-only YouTube OAuth scope probe (private preproduction)
+        if: github.event_name == 'workflow_dispatch' && inputs.preproduction
+        env:
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+        run: python scripts/probe_youtube_oauth.py
       - name: Generate long-form video
         env:
           SKIP_UPLOAD: ${{ github.event_name == 'workflow_dispatch' && inputs.preproduction && '1' || '0' }}
