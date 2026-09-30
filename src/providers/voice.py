@@ -12,6 +12,8 @@ All providers return: (audio_path_or_None, [(word, start, end), ...], provider_n
 Timings are relative to the start of this scene's audio.
 """
 import os
+import threading
+from pipeline_safety import call_provider
 import re
 import shutil
 import asyncio
@@ -82,6 +84,17 @@ _KOKORO_VOICE_MAP = {
 }
 
 
+_KOKORO_INFERENCE_LOCK = threading.Lock()
+
+def warmup():
+    from .local_models import ensure_kokoro
+    try:
+        call_provider(ensure_kokoro)
+        return True
+    except Exception as exc:
+        print(f"Kokoro warmup unavailable: {type(exc).__name__}; using fallback chain", flush=True)
+        return False
+
 def _kokoro(text, voice, out_path):
     import numpy as _np
     import soundfile as _sf
@@ -89,10 +102,11 @@ def _kokoro(text, voice, out_path):
 
     mapped = _KOKORO_VOICE_MAP.get(voice, "af_heart")
     pipeline = ensure_kokoro()
-    gen = pipeline(text, voice=mapped, speed=1, split_pattern=r"\n+")
     chunks = []
-    for _gs, _ps, audio in gen:
-        chunks.append(audio)
+    with _KOKORO_INFERENCE_LOCK:
+        gen = pipeline(text, voice=mapped, speed=1, split_pattern=r"\n+")
+        for _gs, _ps, audio in gen:
+            chunks.append(audio)
     if not chunks:
         raise RuntimeError("kokoro produced no audio")
     full = _np.concatenate(chunks) if len(chunks) > 1 else chunks[0]
@@ -227,7 +241,7 @@ def synth(text, voice, out_path):
     last_err = None
     for name, fn in chain:
         try:
-            path, words = fn(text, voice, out_path)
+            path, words = call_provider(fn, text, voice, out_path)
             return path, words, name
         except Exception as e:
             last_err = e

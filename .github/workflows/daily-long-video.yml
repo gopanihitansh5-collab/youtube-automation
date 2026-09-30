@@ -2,6 +2,11 @@ name: Daily Long-Form Video
 
 on:
   workflow_dispatch:
+    inputs:
+      preproduction:
+        description: Private preproduction only (no YouTube upload)
+        type: boolean
+        default: true
   schedule:
     - cron: "0 12 * * *"
 
@@ -60,6 +65,7 @@ jobs:
           fi
       - name: Generate long-form video
         env:
+          SKIP_UPLOAD: ${{ github.event_name == 'workflow_dispatch' && inputs.preproduction && '1' || '0' }}
           SHEET_ID: ${{ secrets.SHEET_ID }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
@@ -89,6 +95,10 @@ jobs:
             output_long/metadata.json
             output_long/thumbnail.jpg
             output_long/topic_context.json
+            output_long/failure.json
+            output_long/run_state.json
+            output_long/script_cache.json
+            output_long/checkpoints/
           if-no-files-found: warn
           retention-days: 14
       - name: Heartbeat (success)

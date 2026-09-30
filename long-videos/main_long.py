@@ -37,6 +37,10 @@ _load_dotenv()
 import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeout
 
+from pipeline_safety import call_provider, write_failure
+
+_FAILURE_STAGE = "startup"
+
 from src import sheets
 from src.providers import voice as voice_provider, visuals
 from done_tracker import is_done, mark_done, filter_undone
@@ -783,6 +787,7 @@ def _chapter_timestamps(chapters):
 
 
 def main():
+    global _FAILURE_STAGE
     print("=== Long-Form Video Pipeline (8-15 min, landscape 1920x1080) ===",
           flush=True)
     os.makedirs("output_long", exist_ok=True)
@@ -853,9 +858,11 @@ def main():
     voice_results = [None] * len(all_scenes)
     visual_results = [None] * len(all_scenes)
 
+    _FAILURE_STAGE = "voice_visual_generation"
+    voice_provider.warmup()  # no dependency install/model construction in worker fan-out
     with ThreadPoolExecutor(max_workers=6) as pool:
-        voice_futs = {pool.submit(_voice_job, iv): iv for iv in enumerate(all_scenes)}
-        visual_futs = {pool.submit(_visual_job, iv): iv for iv in enumerate(all_scenes)}
+        voice_futs = {pool.submit(call_provider, _voice_job, iv): iv for iv in enumerate(all_scenes)}
+        visual_futs = {pool.submit(call_provider, _visual_job, iv): iv for iv in enumerate(all_scenes)}
 
         for fut in as_completed(voice_futs, timeout=_VOICE_TIMEOUT * len(all_scenes)):
             i, _ = voice_futs[fut]
@@ -879,6 +886,7 @@ def main():
                 print(f"  WARNING: visual scene {i} failed: {e}", flush=True)
                 visual_results[i] = (None, None, "gradient-fallback")
 
+    _FAILURE_STAGE = "render"
     scene_audios, scene_words, durations, voice_used = [], [], [], set()
     for i, res in enumerate(voice_results):
         path, words, used = (res[0], res[1], res[3]) if len(res) >= 4 else (res[0], res[1], "kokoro")
@@ -972,6 +980,7 @@ def main():
     with open("output_long/metadata.json", "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2, ensure_ascii=False)
 
+    _FAILURE_STAGE = "upload"
     yt_ready = all(os.environ.get(k) for k in
                    ("YT_CLIENT_ID", "YT_CLIENT_SECRET", "YT_REFRESH_TOKEN"))
     if os.environ.get("SKIP_UPLOAD", "").lower() in ("1", "true", "yes"):
@@ -1006,8 +1015,12 @@ def main():
 
 if __name__ == "__main__":
     try:
-        sys.exit(main())
-    except Exception:
+        result = call_provider(main)
+        if result:
+            write_failure(RuntimeError("pipeline returned failure"), _FAILURE_STAGE)
+    except Exception as exc:
+        write_failure(exc, _FAILURE_STAGE)
         traceback.print_exc()
-        sys.exit(1)
+        result = 1
+    sys.exit(result)
 
