@@ -82,5 +82,10 @@ def append_held(worksheet, records, execute=False):
     _,pending,confirmed=plan_append(after,records)
     if pending or confirmed!=len(records):raise QueueBlocked('append_write_unverified')
     # Existing content must remain untouched (header extension aside).
-    if after[1:len(before)] != before[1:]:raise QueueBlocked('append_existing_rows_changed')
+    def unpad(row):
+        row=list(row)
+        while row and row[-1]=='':row.pop()
+        return row
+    if [unpad(r) for r in after[1:len(before)]] != [unpad(r) for r in before[1:]]:
+        raise QueueBlocked('append_existing_rows_changed')
     return summary
