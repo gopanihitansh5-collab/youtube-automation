@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy Policy - Personal YouTube Uploader</title>
+<style>body{font-family:system-ui,sans-serif;max-width:42rem;margin:2rem auto;padding:0 1rem;line-height:1.55;color:#222}a{color:#0b57d0}nav a{margin-right:1rem}</style>
+</head>
+<body>
+<h1>Privacy Policy - Personal YouTube Uploader</h1>
+<p><strong>Effective date: October 1, 2026</strong></p>
+<p>This policy covers the personal YouTube upload authorization used by Hitansh Gopani for the Alpha Explorer channel.</p>
+<p><strong>Data used:</strong> The uploader processes the owner's OAuth client configuration and authorization tokens, prepared video files, titles, descriptions, tags, visibility settings, and the resulting YouTube video ID or URL. It does not invite other users to connect accounts or collect information from viewers through this OAuth flow.</p>
+<p><strong>Purpose:</strong> This data is used to authorize uploads and send the owner's prepared videos and metadata to YouTube. It is not sold or used for advertising profiles.</p>
+<p><strong>Services involved:</strong> Google receives OAuth requests and YouTube receives uploaded videos and metadata. GitHub Actions runs the automation. The refresh token is stored in a protected credential store and as a GitHub Actions secret. It is not published in the source repository or included in these pages. Prepared output files and metadata may be retained as workflow artifacts according to their configured retention. Published videos follow their selected YouTube visibility and YouTube's own policies.</p>
+<p><strong>Scope limit:</strong> This refreshed authorization requests <code>youtube.upload</code> only. It does not grant Gmail, Drive, contacts, analytics-readonly, or comment-management access. Optional video-generation services are outside this upload authorization and are not given this YouTube refresh token by the upload code.</p>
+<p><strong>Control and deletion:</strong> The owner can stop the automation, remove the saved authorization token from its credential stores, and revoke the app's access in Google Account settings. Revocation prevents future use of that grant. It does not delete videos already uploaded; those can be managed in YouTube Studio. Stored workflow outputs can be removed separately from the repository's Actions artifacts.</p>
+<p>This is a personal-use tool, not a public user-data collection service. The owner maintains it through the <a href="https://github.com/gopanihitansh5-collab/youtube-automation">source repository</a>.</p>
+<p><a href="index.html">Home</a> | <a href="terms.html">Terms of Use</a></p>
+</body>
+</html>
