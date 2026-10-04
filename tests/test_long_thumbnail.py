@@ -1,6 +1,8 @@
 """Regression tests for the long-form thumbnail pipeline."""
 import importlib.util
 import tempfile
+import os
+import subprocess
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -68,6 +70,30 @@ class ThumbnailTests(unittest.TestCase):
         self.assertIn("Target region: India", prompt)
         self.assertIn("Video angle: daily decision making", prompt)
         self.assertIn("Why it matters: rising interest", prompt)
+
+    def test_drawbox_uses_input_height_not_drawtext_height(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "base.png"
+            source.write_bytes(b"image")
+            for style in self.thumbnail.THUMB_STYLES:
+                with mock.patch.object(self.thumbnail, "_font", return_value="font.ttf"), mock.patch.object(self.thumbnail, "_run") as run:
+                    self.thumbnail.enhance(str(source), "Dark Matter", "Hidden forces", str(Path(tmp)/"thumb.jpg"), style["name"])
+                cmd = run.call_args_list[0].args[0]
+                filters = cmd[cmd.index("-vf")+1]
+                box = filters.split("drawbox=",1)[1].split(",",1)[0]
+                self.assertIn("ih", box)
+                self.assertNotRegex(box.replace("h=", "height="), r"(?<!i)\bh\b")
+
+    @unittest.skipUnless(os.environ.get("FFMPEG_INTEGRATION"), "Set FFMPEG_INTEGRATION for real renderer regression")
+    def test_real_ffmpeg_all_styles(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp)/"base.jpg"
+            from PIL import Image
+            Image.new("RGB", (1280,720), (10,25,60)).save(source)
+            for style in self.thumbnail.THUMB_STYLES:
+                output=Path(tmp)/(style["name"]+".jpg")
+                self.thumbnail.enhance(str(source), "Dark Matter", "Hidden universe", str(output), style["name"])
+                self.assertGreater(output.stat().st_size, 1000)
 
     def test_all_styles_build_valid_expression_based_offsets(self):
         self.assertTrue(

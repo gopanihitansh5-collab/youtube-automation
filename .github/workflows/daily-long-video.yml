@@ -22,6 +22,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 360
     steps:
+      - name: Allocate heartbeat run ID
+        run: echo "HC_RUN_ID=$(python -c 'import uuid; print(uuid.uuid4())')" >> "$GITHUB_ENV"
+      - name: Heartbeat (start)
+        if: github.event_name == 'schedule' || !inputs.preproduction
+        run: curl -fsS -m 10 --retry 3 "${{ secrets.HC_PING_LONG }}/start?rid=${{ env.HC_RUN_ID }}" || true
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
@@ -115,8 +120,8 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
       - name: Heartbeat (success)
-        if: success()
-        run: curl -fsS -m 10 --retry 3 "${{ secrets.HC_PING_LONG }}" || true
+        if: success() && (github.event_name == 'schedule' || !inputs.preproduction)
+        run: curl -fsS -m 10 --retry 3 "${{ secrets.HC_PING_LONG }}?rid=${{ env.HC_RUN_ID }}" || true
       - name: Heartbeat (failure)
-        if: failure()
-        run: curl -fsS -m 10 --retry 3 "${{ secrets.HC_PING_LONG }}/fail" || true
+        if: failure() && (github.event_name == 'schedule' || !inputs.preproduction)
+        run: curl -fsS -m 10 --retry 3 "${{ secrets.HC_PING_LONG }}/fail?rid=${{ env.HC_RUN_ID }}" || true

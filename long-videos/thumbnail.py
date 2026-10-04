@@ -303,9 +303,11 @@ def enhance(image_path, title, hook, out_path, style="bold_split"):
         line1 = safe_title
         line2 = ""
 
+    # drawbox uses ih/iw, unlike drawtext which accepts h/w.
+    box_title_y = style_config["title_y"].replace("h", "ih")
     vf = (
-        f"format=rgba,"
-        f"drawbox=x=0:y={style_config['title_y']}-40:w=iw:h=ih-{style_config['title_y']}+60:"
+        f"scale={W}:{H},format=yuv420p,"
+        f"drawbox=x=0:y=({box_title_y})-40:w=iw:h=ih-({box_title_y})+60:"
         f"color=black@{alpha}:t=fill,"
         f"drawtext=fontfile='{_font_arg(font)}':text='{line1}':"
         f"fontcolor={accent}:fontsize={48 if line2 else 56}:"
@@ -329,7 +331,7 @@ def enhance(image_path, title, hook, out_path, style="bold_split"):
         f"drawtext=fontfile='{_font_arg(font)}':text='{safe_hook}':"
         f"fontcolor=#FFFFFF@0.85:fontsize=28:"
         f"borderw=2:bordercolor=#000000:"
-        f"x=(w-text_w)/2:y=({style_config['subtitle_y']})+60:"
+        f"x=(w-text_w)/2:y=min(h-text_h-24\,({style_config['subtitle_y']})+60):"
         f"box=0:boxcolor=black@0.2:boxborderw=6"
     )
 
