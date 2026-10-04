@@ -21,6 +21,8 @@ import concurrent.futures
 
 
 def _extract_json(text):
+    if not isinstance(text, str) or not text.strip():
+        raise ValueError("Reviewer returned empty or non-text content")
     text = re.sub(r"^```(?:json)?|```$", "", text.strip(), flags=re.MULTILINE).strip()
     start = text.find("{")
     end = text.rfind("}")
@@ -129,15 +131,44 @@ Be harsh. The channel's reputation depends on quality. Pure JSON.
 """
 
 
+
+SCRIPT_CONTEXT_LIMIT = 10000
+
+
+def _script_context(chapters, limit=SCRIPT_CONTEXT_LIMIT):
+    """Include whole scene narrations only; omission is explicit, never slicing."""
+    entries = []
+    used = 0
+    total = 0
+    omitted = []
+    for ci, chapter in enumerate(chapters):
+        for si, scene in enumerate(chapter.get("scenes", []) or []):
+            total += 1
+            narration = scene.get("narration")
+            if not isinstance(narration, str) or not narration.strip():
+                raise ValueError("Missing narration in reviewer script context")
+            entry = f"Chapter {ci+1} {chapter.get('title', '?')}, scene {si+1}: {narration.strip()}"
+            if used + len(entry) + 1 <= limit:
+                entries.append(entry)
+                used += len(entry) + 1
+            else:
+                omitted.append(f"{ci+1}.{si+1}")
+    if not entries:
+        raise ValueError("No complete scene narration fits reviewer context cap")
+    if omitted:
+        label = (f"EXPLICIT SAMPLE: {len(entries)}/{total} complete scene narrations; "
+                 "other scenes omitted due to context cap. No included sentence was cut. "
+                 "Do not infer script incompleteness from omitted scenes. "
+                 "Assess only evidence shown; omissions are not proof of whole-script coverage.")
+    else:
+        label = f"FULL SCRIPT CONTEXT: all {total} complete scene narrations."
+    return label + "\n" + "\n".join(entries)
+
 def review_script(title, hook, chapters):
     """Agent 1: Verify narrative quality and authenticity."""
     n_ch = len(chapters)
     n_sc = sum(len(c.get("scenes", [])) for c in chapters)
-    ch_sample = []
-    for c in chapters[:3]:
-        sc_sample = [s.get("narration", "")[:150] for s in (c.get("scenes", []) or [])[:2]]
-        ch_sample.append(f"{c.get('title','?')}: {' | '.join(sc_sample)}")
-    sample_str = "\n".join(ch_sample)
+    sample_str = _script_context(chapters)
 
     prompt = REVIEW_SCRIPT_PROMPT.format(title=title, hook=hook, n_ch=n_ch,
                                           n_sc=n_sc, chapters_sample=sample_str)
@@ -194,7 +225,10 @@ def review_scenes_unique(chapters):
     keywords = []
     for ci, c in enumerate(chapters):
         for si, s in enumerate(c.get("scenes", [])):
-            kw = s.get("keyword", "")[:100]
+            kw = s.get("keyword")
+            if not isinstance(kw, str) or not kw.strip():
+                return _unavailable_review("Missing scene keyword")
+            kw = kw.strip()
             keywords.append(f"  Ch{ci}-Sc{si}: {kw}")
 
     if not keywords:

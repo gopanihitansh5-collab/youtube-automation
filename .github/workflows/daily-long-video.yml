@@ -125,6 +125,7 @@ jobs:
             output_long/failure.json
             output_long/run_state.json
             output_long/script_cache.json
+            output_long/rejected_plan.json
             output_long/checkpoints/
           if-no-files-found: warn
           retention-days: 14

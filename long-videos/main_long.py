@@ -689,6 +689,15 @@ def _huggingface_long(topic, prompt, temperature):
     raise RuntimeError(f"all HF models failed: {last_err}")
 
 
+
+def _save_rejected_plan(plan, topic, llm_used, gate, reason):
+    """Private diagnostic evidence, never an accepted cache/checkpoint."""
+    os.makedirs("output_long", exist_ok=True)
+    with open("output_long/rejected_plan.json", "w", encoding="utf-8") as handle:
+        json.dump({"status": "rejected_not_rendered_or_uploaded", "topic": topic,
+                   "llm_used": llm_used, "gate": gate, "reason": reason,
+                   "plan": plan}, handle, indent=2, ensure_ascii=False)
+
 def _generate_long_plan(topic, topic_ctx=None):
     import random
     if topic_ctx is None:
@@ -831,6 +840,7 @@ def main():
         review_ok = False
     report["review_gate"] = review
     if not review_ok:
+        _save_rejected_plan(plan, topic, llm_used, "review", review)
         report["quality_gate"] = {"passed": False, "reason": "final reviewer unavailable or failed"}
         clear_cache()
         clear_stages(topic)
@@ -842,6 +852,7 @@ def main():
     ok, why = quality_gate.check(plan, llm_used)
     report["quality_gate"] = {"passed": ok, "reason": why}
     if not ok:
+        _save_rejected_plan(plan, topic, llm_used, "quality", why)
         clear_cache()
         clear_stages(topic)
         with open("output_long/metadata.json", "w", encoding="utf-8") as f:
