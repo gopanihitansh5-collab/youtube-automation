@@ -343,7 +343,7 @@ SCENE_PURPOSE_DESC = {
 
 
 def build_long_prompt(topic, trending_context=None):
-    entropy = int.from_bytes(os.urandom(4)) + time.time_ns()
+    entropy = int.from_bytes(os.urandom(4), "big") + time.time_ns()
     rng = random.Random(_seed(topic) + entropy)
 
     drifted = _drift_topic(topic, rng)
@@ -555,7 +555,7 @@ TOPIC: "{topic}"
 
 
 def build_offline_long_script(topic, meta=None):
-    rng = random.Random(_seed(topic) + int.from_bytes(os.urandom(4)))
+    rng = random.Random(_seed(topic) + int.from_bytes(os.urandom(4), "big"))
     t = topic.strip().rstrip(".!?")
     meta = meta or {}
     arc_name = meta.get("arc", "educational_deep_dive")
@@ -565,30 +565,25 @@ def build_offline_long_script(topic, meta=None):
     cta_style = meta.get("cta", rng.choice(CTA_STYLES))
     hook_style = meta.get("hook_style", rng.choice(HOOK_STYLES))
 
-    hook_line = _generate_hook(hook_style, t, rng)
+    hook_line = _generate_hook("qualitative_contrast", t, rng)
 
-    openers = [
-        f"Let us begin our exploration of {t} by understanding the fundamentals.",
-        f"To properly understand {t}, we first need to establish some context.",
-        f"The story of {t} starts with a question that few people ask.",
-        f"Before we dive deep into {t}, let us set the stage properly.",
+    # Offline output is a labeled preparation scaffold, not invented research.
+    # Draw unique prompts without replacement; never recycle narration to fill length.
+    lenses = ["purpose", "constraints", "tradeoffs", "alternatives", "assumptions", "limits", "choices", "consequences"]
+    questions = [
+        "What would make {lens} useful for this part of {topic}?",
+        "Which question about {lens} should this section answer before moving on?",
+        "How might a hypothetical example explain {lens} without claiming an actual result?",
+        "Where should the explanation of {lens} stop rather than guess at missing evidence?",
+        "What distinction about {lens} would help a viewer compare two possible approaches?",
+        "Why should a viewer consider {lens} before drawing a conclusion?",
+        "When could a change in {lens} alter a hypothetical decision?",
+        "Who might need a clearer explanation of {lens} in this discussion?",
     ]
-    mid_scenes = [
-        f"This is where {t} gets really interesting. The data reveals a pattern that most people miss.",
-        f"Here is a critical insight about {t} that changes how we should think about it.",
-        f"Research into {t} shows us something counter-intuitive that is worth examining closely.",
-        f"Let us look at what the evidence actually says about {t} rather than what people assume.",
-        f"A common misconception about {t} is that it works one way, but the reality is more nuanced.",
-        f"What makes {t} so fascinating is the unexpected connection to broader trends.",
-        f"Experts in {t} have been debating this point for years, and here is where the consensus is settling.",
-        f"The practical implications of {t} are more significant than most people realize.",
-    ]
-    closers = [
-        f"Now that we have explored {t} in depth, let us summarize what really matters.",
-        f"The key takeaway from everything we have covered about {t} is simpler than you might think.",
-        f"As we have seen throughout this exploration of {t}, the truth is both fascinating and practical.",
-        f"What we have learned about {t} today has real implications for how we move forward.",
-    ]
+    narration_pool = [q.format(lens=lens, topic=t) for lens in lenses for q in questions]
+    rng.shuffle(narration_pool)
+    if num_ch * spc > len(narration_pool):
+        raise ValueError("Offline scaffold capacity exceeded; cannot repeat narration")
 
     cta_lines = {
         "subscribe": "If you found this valuable, subscribe for more deep dives like this one.",
@@ -607,15 +602,9 @@ def build_offline_long_script(topic, meta=None):
         ch_title = chapter_titles[ci] if ci < len(chapter_titles) else f"Chapter {ci + 1}"
         chapter_scenes = []
         for si in range(spc):
+            nar = narration_pool.pop()
             if ci == 0 and si == 0:
-                nar = rng.choice(openers).replace("{t}", t)
-            elif si == spc - 1:
-                nar = rng.choice(mid_scenes).replace("{t}", t)
-                if ci < num_ch - 1:
-                    next_ch = chapter_titles[ci + 1] if ci + 1 < len(chapter_titles) else f"the next section"
-                    nar += f" This naturally brings us to {next_ch}, where we will explore this further."
-            else:
-                nar = rng.choice(mid_scenes).replace("{t}", t)
+                nar = "This is an offline preparation outline, not a researched explanation. " + nar
 
             energy = rng.choice(["calm", "curious", "energetic", "intense", "hopeful", "thoughtful"])
             vis_keywords = {
@@ -652,7 +641,7 @@ def build_offline_long_script(topic, meta=None):
 
     return {
         "title": f"{t.title()}: The Complete Guide"[:80],
-        "description": f"A deep dive into {t}.\n\n"
+        "description": f"Offline preparation outline for {t}. Requires substantive generation and independent review before publication.\n\n"
                        f"{cta_line}\n\n"
                        f"#education #{tag_words[0] if tag_words else 'learning'} "
                        f"#deepdive #{tag_words[1] if len(tag_words) > 1 else 'explained'} "

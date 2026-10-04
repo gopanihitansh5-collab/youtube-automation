@@ -833,7 +833,7 @@ def main():
     from reviewer_agents import run_all_reviewers
     try:
         review = run_all_reviewers(plan.get("title", ""), plan.get("hook", ""),
-                                   plan.get("chapters", []), parallel=True)
+                                   plan.get("chapters", []), parallel=True, topic_context=_TOPIC_CTX)
         review_ok = review.get("all_passed") is True
     except Exception as exc:
         review = {"all_passed": False, "error": str(exc)}

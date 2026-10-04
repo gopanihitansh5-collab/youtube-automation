@@ -421,11 +421,12 @@ def stage5_final_review(plan_dict):
 
 # ─── Reviewer Integration ─────────────────────────────────────────────
 
-def _run_reviewers(title, hook, chapters, stage_label):
+def _run_reviewers(title, hook, chapters, stage_label, topic_context=None):
     """Run all reviewer agents and return (passed, results)."""
     from reviewer_agents import run_all_reviewers
     try:
-        review = run_all_reviewers(title, hook, chapters, parallel=True)
+        review = run_all_reviewers(title, hook, chapters, parallel=True,
+                                   topic_context=topic_context, paragraph_stage=stage_label == "Stage 1")
         return review["all_passed"], review
     except Exception as e:
         print(f"  [Reviewer] {stage_label} review error: {e}", flush=True)
@@ -487,7 +488,7 @@ def run_full_pipeline(topic, trending_context=None):
 
     # Review Stage 1
     hook_placeholder = script.get("hook", "")
-    rev1 = _run_reviewers(title, hook_placeholder, ch_data, "Stage 1")
+    rev1 = _run_reviewers(title, hook_placeholder, ch_data, "Stage 1", trending_context)
     if not rev1[0]:
         print("  Stage 1 review failed — retrying with different prompt", flush=True)
         script, m1b = stage1_write_script(topic, trending_context)
@@ -507,7 +508,7 @@ def run_full_pipeline(topic, trending_context=None):
         return build_offline_long_script(topic), "offline", []
 
     # Review Stage 2
-    rev2 = _run_reviewers(title, hook_placeholder, chapters, "Stage 2")
+    rev2 = _run_reviewers(title, hook_placeholder, chapters, "Stage 2", trending_context)
 
     # ── Stage 3: Enhance scenes ──
     enhanced, m3 = load_stage("stage3", topic)
@@ -571,7 +572,7 @@ def run_full_pipeline(topic, trending_context=None):
     }
 
     # Run all reviewers on final plan
-    final_review = _run_reviewers(title, hook, chapters, "pre-gemini")
+    final_review = _run_reviewers(title, hook, chapters, "pre-gemini", trending_context)
     raw_plan = _fix_from_review(raw_plan, final_review[1] if len(final_review) > 1 else {})
 
     # ── Stage 5: Gemini final review ──
@@ -584,7 +585,7 @@ def run_full_pipeline(topic, trending_context=None):
     # Final verification is required, including for cached stages.
     passed, review = _run_reviewers(polished.get("title", title),
                                    polished.get("hook", hook),
-                                   polished.get("chapters", []), "final")
+                                   polished.get("chapters", []), "final", trending_context)
     if not passed:
         raise RuntimeError("Final reviewer gate blocked: unavailable or failed evidence")
 

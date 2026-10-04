@@ -16,8 +16,11 @@ class ContextTests(unittest.TestCase):
         text=r._script_context(chapters)
         self.assertIn('FULL SCRIPT CONTEXT',text);self.assertEqual(text.count(narration.strip()),5)
     def test_cap_labels_omission_preserves_whole_scenes(self):
-        text=r._script_context([{'scenes':[{'narration':'Complete scene one.'},{'narration':'Complete scene two.'}]}],limit=50)
+        text=r._script_context([{'scenes':[{'narration':'Complete scene one.'},{'narration':'Complete scene two.'}]}],limit=80)
         self.assertIn('EXPLICIT SAMPLE',text);self.assertIn('Complete scene one.',text);self.assertNotIn('Complete scene two.',text)
+    def test_degenerate_cap_no_whole_unit_fails_closed(self):
+        with self.assertRaises(ValueError):
+            r._script_context([{'scenes':[{'narration':'Complete scene one.'}]}],limit=1)
     def test_empty_reply_clear_failure(self):
         for value in [None,'',{},7]:
             with self.assertRaises(ValueError):r._extract_json(value)
