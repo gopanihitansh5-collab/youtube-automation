@@ -7,7 +7,9 @@ from src.upload_ledger import UploadConflict
 
 BANK={
  'dark-matter-corrected':('240f78db91484acf3a4d064c91bbc34d28a45d207f35b3be31897ada93523865','REVIEWED_DARK_MATTER_URL'),
- 'passkeys-oct4':('3d7db25a7b988f8781a8436a9ac3f7111a08ee94e95d5287e8a5d82c064e880c','REVIEWED_PASSKEYS_URL')}
+ 'passkeys-oct4':('3d7db25a7b988f8781a8436a9ac3f7111a08ee94e95d5287e8a5d82c064e880c','REVIEWED_PASSKEYS_URL'),
+ 'ai-sandbox-private':('c89c0a45076eeffeea67f40a9870d046f4d9ee40d5e6826e240212cb5d733fd0','REVIEWED_AI_SANDBOX_URL')}
+UPLOAD_ONLY={'ai-sandbox-private'}  # private insert with upload scope only; no channel/dedup reads
 def main():
  episode=os.environ['BANK_EPISODE'];expected,secret=BANK[episode];url=os.environ.get(secret)
  if not url:raise UploadConflict('Reviewed bank transport is not provisioned')
@@ -25,6 +27,11 @@ def main():
  if digest.hexdigest()!=expected:raise UploadConflict('Reviewed bank hash mismatch')
  subprocess.run(['ffmpeg','-v','error','-xerror','-i',str(path),'-f','null','-'],check=True,timeout=300)
  meta=json.loads(Path('reviewed-bank/'+episode+'.json').read_text())
+ if episode in UPLOAD_ONLY:
+  result=youtube_upload.upload(str(path),meta['title'],meta['description'],meta.get('tags',[]),'private',episode_id='reviewed:'+episode,verify_readback=False)
+  (root/'result.json').write_text(json.dumps({'url':result,'episode':episode,'state':'private_uploaded_readback_skipped'}))
+  print('Private upload recorded:',result)
+  return
  service=youtube_upload._service(extra_scopes=['https://www.googleapis.com/auth/youtube.readonly'])
  channels=service.channels().list(part='id,contentDetails',mine=True).execute().get('items',[])
  if len(channels)!=1 or channels[0]['id']!='UCslmke9cOovN4gBowddLKiA':raise UploadConflict('Channel binding mismatch')

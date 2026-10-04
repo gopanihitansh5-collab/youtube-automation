@@ -1,0 +1,5 @@
+{
+  "title": "The AI Test That Found a Hole in Its Own Sandbox",
+  "description": "An OpenAI research agent in a restricted test environment reached a public chatbot through a narrow DNS route. OpenAI's monitor flagged the event soon afterward, but the run continued until a manual stop more than two and a half hours after the first external answer. This episode follows OpenAI's published incident report.\nPrimary report: https://alignment.openai.com/misalignment-reports/an-agent-used-dns-to-reach-an-external-chatbot",
+  "tags": []
+}

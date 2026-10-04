@@ -42,7 +42,7 @@ def _service(extra_scopes=None):
     return build("youtube", "v3", credentials=creds)
 
 
-def upload(path, title, description, tags, privacy="public", hook=None, comment=None, episode_id=None, ledger_dir=None):
+def upload(path, title, description, tags, privacy="public", hook=None, comment=None, episode_id=None, ledger_dir=None, verify_readback=True):
     youtube = _service()
     if not youtube:
         raise RuntimeError("YouTube secrets not configured")
@@ -50,12 +50,14 @@ def upload(path, title, description, tags, privacy="public", hook=None, comment=
     store = PrivateGitHubStore()
     ledger = Ledger(path, episode_id or title, ledger_dir or os.environ.get("YT_UPLOAD_LEDGER_DIR", "/tmp/youtube-upload-ledger"), store=store)
     if ledger.data.get("video_id"):
-        _verify_ready(youtube, ledger.data["video_id"], privacy, ledger)
+        if verify_readback:
+            _verify_ready(youtube, ledger.data["video_id"], privacy, ledger)
         return "https://youtu.be/" + ledger.data["video_id"]
     if ledger.data and not ledger.data.get("session_uri"):
         video_id = _reconcile_existing(ledger)
         ledger.save(video_id=video_id, state="reconciled")
-        _verify_ready(youtube, video_id, privacy, ledger)
+        if verify_readback:
+            _verify_ready(youtube, video_id, privacy, ledger)
         return "https://youtu.be/" + video_id
 
     desc = (description or "").strip()
@@ -100,7 +102,8 @@ def upload(path, title, description, tags, privacy="public", hook=None, comment=
             raise UploadConflict("Upload paused; private receipt retained. Do not start a new insert.") from None
     video_id = response["id"]
     ledger.save(video_id=video_id, state="uploaded")
-    _verify_ready(youtube, video_id, privacy, ledger)
+    if verify_readback:
+        _verify_ready(youtube, video_id, privacy, ledger)
 
     # Pinning is not exposed by the YouTube Data API. UI review owns the
     # sourced comment and pin, never an unsupported isPinned write.

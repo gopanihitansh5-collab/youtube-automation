@@ -8,6 +8,7 @@ on:
         options:
           - dark-matter-corrected
           - passkeys-oct4
+          - ai-sandbox-private
 permissions:
   contents: write
 concurrency:
@@ -30,6 +31,7 @@ jobs:
           BANK_EPISODE: ${{ inputs.episode }}
           REVIEWED_DARK_MATTER_URL: ${{ secrets.REVIEWED_DARK_MATTER_URL }}
           REVIEWED_PASSKEYS_URL: ${{ secrets.REVIEWED_PASSKEYS_URL }}
+          REVIEWED_AI_SANDBOX_URL: ${{ secrets.REVIEWED_AI_SANDBOX_URL }}
           UPLOAD_LEDGER_KEY: ${{ secrets.UPLOAD_LEDGER_KEY }}
           UPLOAD_LEDGER_GITHUB_TOKEN: ${{ github.token }}
           UPLOAD_LEDGER_REPO: ${{ github.repository }}
