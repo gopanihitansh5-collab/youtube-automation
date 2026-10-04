@@ -1,0 +1,10 @@
+{
+  "title": "How Passkeys Work: The Login You Cannot Type Into a Fake Site",
+  "description": "How a passkey login works: public and private keys, signed challenges, website identity, local verification, synced storage, and recovery. Conceptual diagrams, no real credentials or biometric data. Phishing resistance is not a promise that the whole account is invulnerable.\n\n0:00 A login without a reusable password\n1:02 Two keys, different jobs\n2:13 Why the website identity matters\n3:24 Your face is a local unlock\n4:31 Synced does not mean device-bound\n5:43 The rest of the account still matters\n\nSources checked October4,2026:\nhttps://fidoalliance.org/passkeys/\nhttps://developer.mozilla.org/en-US/docs/Web/Security/Authentication/Passkeys\nhttps://support.apple.com/en-us/102195\nhttps://developers.google.com/identity/passkeys/developer-guides/server-authentication\nhttps://pages.nist.gov/800-63-4/sp800-63b/syncable/\nhttps://cheatsheetseries.owasp.org/cheatsheets/Passkey_Security_Cheat_Sheet.html\n\n#Passkeys #Cybersecurity #WebAuthn #Technology\n",
+  "tags": [
+    "passkeys",
+    "WebAuthn",
+    "cybersecurity",
+    "authentication"
+  ]
+}
