@@ -67,7 +67,7 @@ LONG_FORM_ARCS = [
     {"name": "documentary", "description": "Chronological exploration of a topic with historical context, key milestones, and primary sources", "chapters": (5, 7)},
     {"name": "case_study", "description": "Deep forensic analysis of one specific example, event, or subject with granular detail", "chapters": (4, 6)},
     {"name": "explainer", "description": "How something works, step by step, breaking down complexity into digestible mental models", "chapters": (5, 8)},
-    {"name": "analysis", "description": "Data-driven breakdown of a situation, trend, or phenomenon with statistical evidence", "chapters": (4, 7)},
+    {"name": "analysis", "description": "Clear breakdown of a situation, trend, or phenomenon using supplied evidence or qualitative reasoning", "chapters": (4, 7)},
     {"name": "tutorial", "description": "Actionable guide with clear steps the viewer can follow and apply immediately in real life", "chapters": (5, 7)},
     {"name": "comparison", "description": "Side-by-side examination of two approaches, systems, or philosophies with balanced evaluation", "chapters": (4, 6)},
     {"name": "debate", "description": "Present both sides of a controversial topic with rigorous fair treatment of each position", "chapters": (4, 6)},
@@ -166,7 +166,7 @@ VOICES = [
 TONES = ["educational", "authoritative", "engaging", "thoughtful", "analytical", "conversational", "inspiring", "critical"]
 
 HOOK_STYLES = [
-    "question", "bold_claim", "surprising_stat", "story_opener",
+    "question", "bold_claim", "qualitative_contrast", "story_opener",
     "myth_debunk", "relatable", "challenge", "curiosity_gap",
 ]
 
@@ -185,10 +185,10 @@ RHETORICAL_DEVICES = [
     "rule of three for emphasis",
     "metaphor or analogy for complex ideas",
     "hypophora (ask a question then answer it)",
-    "direct quote from an expert or study",
+    "context-supported optional quotation; otherwise explain the idea in plain words",
     "contrast (not X, but Y)",
     "anecdote or mini-story",
-    "statistical fact for credibility",
+    "context-supported optional detail; otherwise a qualitative comparison",
 ]
 
 _ANGLE_TEMPLATES = [
@@ -244,11 +244,11 @@ HOOK_TEMPLATES = {
         "Here is why {topic} will never be the same again.",
         "The real reason {topic} matters more than you realize.",
     ],
-    "surprising_stat": [
-        "{percent}% of people do not know this about {topic}.",
-        "Studies show {finding} about {topic}.",
-        "The number behind {topic} will shock you.",
-        "Here is what {percent}% of experts get wrong about {topic}.",
+    "qualitative_contrast": [
+        "How can the same {topic} idea work differently in another situation?",
+        "What changes when you look at {topic} from another point of view?",
+        "Which part of {topic} is easier to misunderstand than to explain?",
+        "What tradeoff matters most when you think about {topic}?",
     ],
     "story_opener": [
         "I discovered something about {topic} that changed my perspective forever.",
@@ -285,9 +285,8 @@ HOOK_FILLERS = {
     "detail": "most people overlook this critical factor",
     "provocation": "everything you understood so far needs a complete rethink",
     "curiosity": "the most successful people approach this completely differently",
-    "finding": "consistent patterns emerge across decades of research",
+    "finding": "different choices can lead to different outcomes",
     "reveal": "when you dig deeper than surface-level understanding",
-    "percent": "87",
     "topic": "this topic",
 }
 
@@ -328,14 +327,14 @@ ENERGY_PALETTE_DESC = {
 SCENE_PURPOSE_DESC = {
     "introduce_concept": "introduce a new idea clearly and simply",
     "deepen_understanding": "build on the previous concept with more depth",
-    "provide_evidence": "show data, research, or proof for the claim",
+    "provide_evidence": "explain the reasoning; include evidence only when supplied in topic context",
     "counter_argument": "present an opposing view fairly",
     "real_world_example": "give a concrete example the viewer can relate to",
-    "data_point": "cite a specific statistic or research finding",
+    "data_point": "use a supplied-context detail if available; otherwise explain a qualitative pattern",
     "historical_context": "provide background that led to the current situation",
     "practical_application": "show how this applies in real life",
     "common_mistake": "highlight errors people often make",
-    "expert_insight": "share what authorities in the field say",
+    "expert_insight": "explain a relevant perspective; quote a named source only if supplied in topic context",
     "future_implication": "explore where this trend is heading",
     "key_takeaway": "distill the most important point from this section",
     "transition_to_next": "bridge to the next chapter naturally",
@@ -464,7 +463,7 @@ HUMAN AUTHENTICITY RULES (MANDATORY — VIOLATION BREAKS THE ILLUSION):
 1. Vary sentence starters aggressively. Never begin two consecutive sentences with the same word. Never begin more than 3 sentences in a chapter with the same part of speech.
 2. Use contractions naturally (don't, can't, won't, isn't, it's, there's, that's, they've).
 3. Occasionally start a sentence with "And", "But", "So", "Or", "Because" — real humans speak this way.
-4. Include one specific concrete example per chapter — a real number, a named person, a specific date, a place, or a study citation.
+4. Include a relatable qualitative or explicitly hypothetical example per chapter. A number, date, named factual case, study citation or quotation is optional only when supplied in topic context.
 5. Use analogies and metaphors to explain abstract concepts. At least one per chapter.
 6. Vary paragraph length. A single short punchy sentence followed by a longer 3-sentence explanation creates natural rhythm.
 7. No formulaic transitions. Instead of "Now let's look at X", try "X tells a completely different story" or "This is where X gets fascinating".
@@ -500,7 +499,7 @@ Return ONLY valid JSON with EXACTLY these keys:
       "title": "Chapter Title Here",
       "timestamp_sec": 0,
       "scenes": [
-        {{"narration": "3-5 sentences delivering one complete narrative beat in natural spoken language. 40-80 words. Should include one specific detail (number, name, example).", "keyword": "CINEMATIC VISUAL BRIEF 15-25 words for landscape 16:9 stock footage — unique perspective, lighting, and subject"}}
+        {{"narration": "3-5 sentences delivering one complete narrative beat in natural spoken language. 40-80 words. Use a relatable qualitative detail; specific factual numbers or names only when supplied in topic context.", "keyword": "CINEMATIC VISUAL BRIEF 15-25 words for landscape 16:9 stock footage — unique perspective, lighting, and subject"}}
       ]
     }}
   ]

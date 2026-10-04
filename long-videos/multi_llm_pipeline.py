@@ -177,7 +177,7 @@ Return ONLY valid JSON:
   "chapters": [
     {{
       "title": "Chapter title",
-      "paragraphs": ["3-5 sentences each, natural spoken English. Vary sentence starters. Use contractions. Include specific numbers, dates, examples."],
+      "paragraphs": ["3-5 sentences each, natural spoken English. Vary sentence starters. Use contractions. Use qualitative or explicitly hypothetical examples; specific factual numbers and dates only if supplied in topic context."],
       "estimated_seconds": 60-120
     }}
   ],
@@ -187,7 +187,7 @@ Return ONLY valid JSON:
 HUMAN AUTHENTICITY RULES:
 - Vary sentence starters aggressively. Never start 2 consecutive sentences with the same word.
 - Use contractions naturally (don't, can't, won't, it's, there's).
-- Include one specific concrete example per chapter.
+- Include one relatable qualitative or explicitly hypothetical example per chapter; factual specifics only from supplied topic context.
 - Never use: "delve into", "let's dive in", "in this video we'll explore", "it's worth noting", "in conclusion", "overall".
 - Read aloud: every paragraph must sound like a real human expert speaking naturally.
 - No markdown fences. Pure JSON.
@@ -365,7 +365,7 @@ TASK:
 2. RESTRUCTURE: Ensure chapters flow logically. Add/merge if needed.
 3. ENHANCE TITLE: Make it more clickable while staying honest (<=80 chars).
 4. BOOST SCORES: Ensure virality >= 0.70, attention >= 0.70, authenticity >= 0.80.
-5. ADD SPECIFICS: Replace vague statements with search-grounded facts.
+5. CLARIFY: Replace vague prose with clear qualitative explanations. Include specific factual details only from supplied topic context.
 
 CURRENT PLAN:
 {plan_json}
@@ -392,7 +392,7 @@ Return ONLY valid JSON with EXACTLY this structure:
 }}
 
 Rules:
-- Use search grounding to verify facts. Add real numbers, dates, named examples.
+- Use search grounding to check existing claims. Do not add numbers, dates, quotations or named factual examples absent from supplied topic context.
 - Ensure every scene keyword is unique in subject + angle + lighting.
 - Maintain human authenticity: varied sentence starters, contractions, natural rhythm.
 - No AI tells. No "delve into", "let's dive in", "in conclusion".
