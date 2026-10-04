@@ -7,6 +7,10 @@ on:
         description: Private preproduction only (no YouTube upload)
         type: boolean
         default: true
+      fresh_script:
+        description: Regenerate selected topic script and bypass its restored stage checkpoints
+        type: boolean
+        default: false
   schedule:
     - cron: "0 12 * * *"
 
@@ -83,6 +87,7 @@ jobs:
         run: python scripts/probe_sheet_binding.py
       - name: Generate long-form video
         env:
+          FRESH_SCRIPT: ${{ github.event_name == 'workflow_dispatch' && inputs.fresh_script && '1' || '0' }}
           SKIP_UPLOAD: ${{ github.event_name == 'workflow_dispatch' && inputs.preproduction && '1' || '0' }}
           SHEET_ID: ${{ secrets.SHEET_ID }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}

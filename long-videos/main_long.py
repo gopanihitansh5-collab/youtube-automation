@@ -695,6 +695,14 @@ def _generate_long_plan(topic, topic_ctx=None):
         topic_ctx = _TOPIC_CTX
     meta = {}
 
+    # Explicit fresh-script request clears only this selected topic's stages.
+    if os.environ.get("FRESH_SCRIPT") == "1":
+        cached_for_reset = load_cached_script()
+        if cached_for_reset and cached_for_reset.get("topic") == topic:
+            clear_cache()
+        clear_stages(topic)
+        print("  fresh script: cleared selected topic checkpoints", flush=True)
+
     # Check if we already have a cached script
     cached = load_cached_script()
     if cached and "offline" in str(cached.get("llm_used", "")).lower():
@@ -811,9 +819,31 @@ def main():
     plan, llm_used, meta = _generate_long_plan(topic, topic_ctx=_TOPIC_CTX)
     report["providers"]["script"] = llm_used
 
+    # Every generation path, including single-provider and cached plans, needs
+    # explicit independent review. Exceptions and missing results fail closed.
+    from reviewer_agents import run_all_reviewers
+    try:
+        review = run_all_reviewers(plan.get("title", ""), plan.get("hook", ""),
+                                   plan.get("chapters", []), parallel=True)
+        review_ok = review.get("all_passed") is True
+    except Exception as exc:
+        review = {"all_passed": False, "error": str(exc)}
+        review_ok = False
+    report["review_gate"] = review
+    if not review_ok:
+        report["quality_gate"] = {"passed": False, "reason": "final reviewer unavailable or failed"}
+        clear_cache()
+        clear_stages(topic)
+        with open("output_long/metadata.json", "w", encoding="utf-8") as f:
+            json.dump(report, f, indent=2, ensure_ascii=False)
+        print("ERROR: final reviewer gate blocked. Nothing rendered or uploaded.", flush=True)
+        return 1
+
     ok, why = quality_gate.check(plan, llm_used)
     report["quality_gate"] = {"passed": ok, "reason": why}
     if not ok:
+        clear_cache()
+        clear_stages(topic)
         with open("output_long/metadata.json", "w", encoding="utf-8") as f:
             json.dump(report, f, indent=2, ensure_ascii=False)
         print(f"ERROR: quality gate blocked this run -- {why}. "

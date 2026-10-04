@@ -407,10 +407,10 @@ def stage5_final_review(plan_dict):
             total = sum(len(c.get("scenes", [])) for c in data["chapters"])
             print(f"  → reviewed: {len(data['chapters'])} ch, {total} scenes via {model}", flush=True)
             return data, model
-        print(f"  → Gemini returned invalid structure, keeping original", flush=True)
+        print(f"  → Gemini returned invalid structure; blocking final review", flush=True)
     except Exception as e:
-        print(f"  → Gemini review failed ({e}), keeping original", flush=True)
-    return plan_dict, "review-skipped"
+        print(f"  → Gemini review failed ({e}); blocking final review", flush=True)
+    raise RuntimeError("Final Gemini review unavailable or malformed")
 
 
 # ─── Reviewer Integration ─────────────────────────────────────────────
@@ -423,7 +423,7 @@ def _run_reviewers(title, hook, chapters, stage_label):
         return review["all_passed"], review
     except Exception as e:
         print(f"  [Reviewer] {stage_label} review error: {e}", flush=True)
-        return True, {}
+        return False, {}
 
 
 def _fix_from_review(plan, review_results):
@@ -570,19 +570,17 @@ def run_full_pipeline(topic, trending_context=None):
 
     # ── Stage 5: Gemini final review ──
     polished, m5 = load_stage("stage5", topic)
-    if not polished:
+    if not polished or not m5 or "review-skipped" in m5:
         polished, m5 = stage5_final_review(raw_plan)
         save_stage("stage5", topic, polished, m5)
     models_used.append(m5)
 
-    # Final verification
-    from reviewer_agents import review_safety, review_pacing
-    try:
-        safety = review_safety(title, polished.get("chapters", []))
-        if not safety.get("passed", True):
-            print(f"  SAFETY BLOCKED: {safety.get('issues',[])}", flush=True)
-    except Exception:
-        pass
+    # Final verification is required, including for cached stages.
+    passed, review = _run_reviewers(polished.get("title", title),
+                                   polished.get("hook", hook),
+                                   polished.get("chapters", []), "final")
+    if not passed:
+        raise RuntimeError("Final reviewer gate blocked: unavailable or failed evidence")
 
     llm_chain = " → ".join(models_used)
     final_ch = len(polished.get("chapters", []))

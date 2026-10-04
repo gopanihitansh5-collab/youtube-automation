@@ -34,6 +34,23 @@ def _extract_json(text):
         return None
 
 
+
+def _review_data(text, minimum_score):
+    data = _extract_json(text)
+    if not isinstance(data, dict) or type(data.get("pass")) is not bool:
+        raise ValueError("Reviewer must return an explicit boolean pass")
+    score = data.get("score")
+    if type(score) not in (int, float) or not 0 <= score <= 10:
+        raise ValueError("Reviewer must return a score in [0, 10]")
+    if data["pass"] and score < minimum_score:
+        raise ValueError("Reviewer pass contradicts its minimum score")
+    return data
+
+
+def _unavailable_review(reason):
+    return {"passed": False, "score": 0, "issues": [str(reason)],
+            "model": "none", "available": False}
+
 def _call_reviewer(prompt, temperature=0.2, max_tokens=4096, timeout=120):
     """Call cheapest available LLM for review. Groq → OpenRouter free."""
     import requests
@@ -120,7 +137,7 @@ def review_script(title, hook, chapters):
                                           n_sc=n_sc, chapters_sample=sample_str)
     try:
         text, model = _call_reviewer(prompt)
-        data = _extract_json(text) or {}
+        data = _review_data(text, 7)
         score = data.get("score", 0)
         passed = data.get("pass", False)
         print(f"  [Reviewer] Script score: {score}/10 pass={passed} via {model}", flush=True)
@@ -137,7 +154,7 @@ def review_script(title, hook, chapters):
         }
     except Exception as e:
         print(f"  [Reviewer] Script review unavailable: {e}", flush=True)
-        return {"passed": True, "score": 7, "issues": [], "suggestions": [], "model": "none"}
+        return _unavailable_review("Reviewer evidence unavailable or no reviewable scenes")
 
 
 # ─── Agent 2: Scene Uniqueness Reviewer ──────────────────────────────
@@ -175,12 +192,12 @@ def review_scenes_unique(chapters):
             keywords.append(f"  Ch{ci}-Sc{si}: {kw}")
 
     if not keywords:
-        return {"passed": True, "score": 10, "issues": [], "model": "none"}
+        return _unavailable_review("Reviewer evidence unavailable or no reviewable scenes")
 
     prompt = REVIEW_SCENES_PROMPT.format(scenes_keywords="\n".join(keywords))
     try:
         text, model = _call_reviewer(prompt)
-        data = _extract_json(text) or {}
+        data = _review_data(text, 7)
         score = data.get("score", 8)
         passed = data.get("pass", True)
         dupes = data.get("duplicate_groups", [])
@@ -195,7 +212,7 @@ def review_scenes_unique(chapters):
         }
     except Exception as e:
         print(f"  [Reviewer] Scene review unavailable: {e}", flush=True)
-        return {"passed": True, "score": 8, "duplicate_groups": [], "model": "none"}
+        return _unavailable_review("Reviewer evidence unavailable or no reviewable scenes")
 
 
 # ─── Agent 3: Content Safety ─────────────────────────────────────────
@@ -232,7 +249,7 @@ def review_safety(title, chapters):
     prompt = REVIEW_SAFETY_PROMPT.format(title=title, chapter_topics="; ".join(ch_topics))
     try:
         text, model = _call_reviewer(prompt)
-        data = _extract_json(text) or {}
+        data = _review_data(text, 8)
         passed = data.get("pass", True)
         risk = data.get("risk_level", "low")
         print(f"  [Reviewer] Safety: risk={risk}, pass={passed} via {model}", flush=True)
@@ -247,7 +264,7 @@ def review_safety(title, chapters):
         }
     except Exception as e:
         print(f"  [Reviewer] Safety check unavailable: {e}", flush=True)
-        return {"passed": True, "score": 10, "risk_level": "low", "issues": [], "model": "none"}
+        return _unavailable_review("Reviewer evidence unavailable or no reviewable scenes")
 
 
 # ─── Agent 4: Visual Search Predictor ────────────────────────────────
@@ -282,12 +299,12 @@ def review_visual_feasibility(chapters):
                 kws.append(f"[{len(kws)}] {kw}")
 
     if not kws:
-        return {"passed": True, "score": 10, "issues": [], "model": "none"}
+        return _unavailable_review("Reviewer evidence unavailable or no reviewable scenes")
 
     prompt = REVIEW_VISUALS_PROMPT.format(keywords="\n".join(kws[:30]))
     try:
         text, model = _call_reviewer(prompt)
-        data = _extract_json(text) or {}
+        data = _review_data(text, 7)
         passed = data.get("pass", True)
         coverage = data.get("predicted_coverage", 80)
         hard = data.get("hard_to_find", [])
@@ -303,7 +320,7 @@ def review_visual_feasibility(chapters):
         }
     except Exception as e:
         print(f"  [Reviewer] Visual review unavailable: {e}", flush=True)
-        return {"passed": True, "score": 8, "hard_to_find": [], "model": "none"}
+        return _unavailable_review("Reviewer evidence unavailable or no reviewable scenes")
 
 
 # ─── Agent 5: Duration & Pacing ──────────────────────────────────────
@@ -344,7 +361,7 @@ def review_pacing(chapters):
                                           chapter_durs="\n".join(ch_durs))
     try:
         text, model = _call_reviewer(prompt)
-        data = _extract_json(text) or {}
+        data = _review_data(text, 6)
         passed = data.get("pass", True)
         est = data.get("estimated_total_sec", total_scenes * 30)
         print(f"  [Reviewer] Pacing: ~{est//60}m{est%60:02d}s, pass={passed} via {model}", flush=True)
@@ -357,7 +374,7 @@ def review_pacing(chapters):
         }
     except Exception as e:
         print(f"  [Reviewer] Pacing review unavailable: {e}", flush=True)
-        return {"passed": True, "score": 7, "estimated_total_sec": total_scenes * 30, "model": "none"}
+        return _unavailable_review("Reviewer evidence unavailable or no reviewable scenes")
 
 
 # ─── Run All Reviewers ──────────────────────────────────────────────
@@ -401,7 +418,10 @@ def run_all_reviewers(title, hook, chapters, parallel=True):
                 print(f"  [Reviewer] Agent failed: {e}", flush=True)
 
     # Summary
-    all_passed = all(r.get("passed", True) for r in results.values() if r)
+    all_passed = (set(results) == {"script", "scenes", "safety", "visuals", "pacing"}
+                  and all(isinstance(r, dict) and r.get("passed") is True
+                          and r.get("model") not in (None, "", "none")
+                          for r in results.values()))
     scores = {k: v.get("score", 0) for k, v in results.items() if v}
     print(f"  [Reviewer] All agents complete. Passed={all_passed}. Scores: {scores}", flush=True)
     return {"results": results, "all_passed": all_passed, "scores": scores}
