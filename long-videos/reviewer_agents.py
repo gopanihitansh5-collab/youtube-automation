@@ -55,7 +55,9 @@ def _call_reviewer(prompt, temperature=0.2, max_tokens=4096, timeout=120):
     """Call cheapest available LLM for review. Groq → OpenRouter free."""
     import requests
     key = os.environ.get("GROQ_API_KEY")
-    models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
+    # Verified by authenticated models GET in steplab run130 on 2026-10-05.
+    # Catalog presence is not quota evidence; failures remain fail-closed.
+    models = ["openai/gpt-oss-120b", "openai/gpt-oss-20b"]
     last_err = None
     if key:
         for model in models:
@@ -75,7 +77,11 @@ def _call_reviewer(prompt, temperature=0.2, max_tokens=4096, timeout=120):
     # Fallback to OpenRouter
     or_key = os.environ.get("OPENROUTER_API_KEY")
     if or_key:
-        or_models = ["meta-llama/llama-3.3-70b-instruct:free", "google/gemma-3-27b-it:free"]
+        # Live OpenRouter models GET on 2026-10-05: explicit :free entries,
+        # prompt/completion pricing both zero. No paid-name fallback.
+        or_models = ["nvidia/nemotron-3-super-120b-a12b:free",
+                     "google/gemma-4-31b-it:free",
+                     "google/gemma-4-26b-a4b-it:free"]
         for model in or_models:
             try:
                 r = requests.post(
