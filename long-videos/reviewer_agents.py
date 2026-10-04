@@ -267,7 +267,10 @@ Check for:
 5. Sensitive topics that need disclaimer
 
 TITLE: {title}
-CHAPTER_TOPICS: {chapter_topics}
+ACTUAL NARRATION CLAIM CONTEXT:
+{claim_context}
+Review evidence shown for unsupported specifics, not only topic labels. If this
+is an explicit sample, do not claim full-script fact verification.
 
 Return ONLY valid JSON:
 {{
@@ -285,8 +288,15 @@ Pure JSON.
 
 def review_safety(title, chapters):
     """Agent 3: Content safety check before render."""
-    ch_topics = [c.get("title", "") for c in chapters[:6]]
-    prompt = REVIEW_SAFETY_PROMPT.format(title=title, chapter_topics="; ".join(ch_topics))
+    claim_chapters = []
+    for chapter in chapters:
+        if chapter.get("scenes"):
+            claim_chapters.append(chapter)
+        else:
+            claim_chapters.append({"title": chapter.get("title", ""), "scenes":
+                                   [{"narration": text} for text in chapter.get("paragraphs", [])]})
+    prompt = REVIEW_SAFETY_PROMPT.format(title=title,
+                                          claim_context=_script_context(claim_chapters))
     try:
         text, model = _call_reviewer(prompt)
         data = _review_data(text, 8)
@@ -389,13 +399,22 @@ Pure JSON.
 
 def review_pacing(chapters):
     """Agent 5: Verify scene durations and overall pacing."""
-    ch_durs = []
+    ch_durs = ["ESTIMATES ONLY: derived from actual narration word counts at 150 words/minute. "
+               "Not measured voiceover timings or declared production durations."]
     total_scenes = 0
-    for c in chapters:
-        scenes = c.get("scenes", [])
-        n = len(scenes)
-        total_scenes += n
-        ch_durs.append(f"{c.get('title','?')}: {n} scenes")
+    for ci, chapter in enumerate(chapters):
+        rows = []
+        for si, scene in enumerate(chapter.get("scenes", []) or []):
+            narration = scene.get("narration")
+            if not isinstance(narration, str) or not narration.strip():
+                return _unavailable_review("Missing narration for pacing estimate")
+            words = len(narration.split())
+            seconds = round(words * 60 / 150, 1)
+            rows.append(f"scene {si+1}: {words} words, estimated {seconds}s")
+            total_scenes += 1
+        ch_durs.append(f"Chapter {ci+1} {chapter.get('title', '?')}: " + "; ".join(rows))
+    if not total_scenes:
+        return _unavailable_review("No scene narration for pacing estimate")
 
     prompt = REVIEW_PACING_PROMPT.format(n_scenes=total_scenes,
                                           chapter_durs="\n".join(ch_durs))

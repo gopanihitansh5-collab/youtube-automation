@@ -62,7 +62,7 @@ class FailClosedTests(unittest.TestCase):
         def fail(*a, **k): raise RuntimeError('429')
         import json
         f = function(ROOT/'long-videos/multi_llm_pipeline.py', 'stage5_final_review',
-                     {'json':json,'STAGE5_PROMPT':'{plan_json}', '_safe_format':lambda s, **k:s.format(**k), '_call_gemini_review':fail})
+                     {'FACTUAL_GENERATION_RULE':'No invented facts.','json':json,'STAGE5_PROMPT':'{plan_json}', '_safe_format':lambda s, **k:s.format(**k), '_call_gemini_review':fail})
         with self.assertRaises(RuntimeError): f({'chapters': self.chapters})
 
     def test_gate_and_cache_order(self):

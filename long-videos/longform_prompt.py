@@ -11,6 +11,18 @@ import re
 import time
 from pathlib import Path
 
+
+FACTUAL_GENERATION_RULE = """FACTUAL EVIDENCE RULE (overrides example/number/quote requests):
+Do not invent citations, studies, memos, percentages, statistics, dates, named
+case outcomes, or quotations. Specific factual claims may appear only when
+explicitly supplied in the topic context. Do not treat the topic name or a
+headline as evidence for details it does not contain. Without supplied evidence,
+use general qualitative phrasing, or a plainly hypothetical example with no
+invented measured result. Do not manufacture sources to make prose look grounded.
+This is a generation constraint, not a fact-check or retrieval system. Independent
+safety and quality gates still review the resulting plan.
+"""
+
 _MAX_MEMORY = 200
 
 _OUTPUT_DIR = os.environ.get("LONGFORM_OUTPUT_DIR", "output_long")
@@ -539,6 +551,7 @@ TOPIC: "{topic}"
             prompt += "\n\nCURRENT CONTEXT (integrate naturally into the narrative):\n" + "\n".join(ctx_lines)
             prompt += "\n\nReference these current events where relevant to make the content timely and grounded in real news."
 
+    prompt += "\n\n" + FACTUAL_GENERATION_RULE
     return prompt, meta
 
 

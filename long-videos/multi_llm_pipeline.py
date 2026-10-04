@@ -13,6 +13,7 @@ import json
 import requests
 
 from script_cache import estimate_tokens, suggest_model, fits_in_context
+from longform_prompt import FACTUAL_GENERATION_RULE
 
 
 def _safe_format(template, **kwargs):
@@ -199,6 +200,7 @@ def stage1_write_script(topic, trending_context=None):
     if trending_context and trending_context.get("context_block"):
         ctx = "\nCURRENT CONTEXT:\n" + trending_context["context_block"]
     prompt = _safe_format(STAGE1_PROMPT, topic=topic, trending_context=ctx)
+    prompt += "\n\n" + FACTUAL_GENERATION_RULE
     print("  [Stage 1/5] Script writer (Groq → OpenRouter)...", flush=True)
     text, model = _call_free_llm(prompt, temperature=0.75, max_tokens=16384)
     data = _extract_json(text) or {}
@@ -247,6 +249,7 @@ def stage2_breakdown_scenes(chapters_data):
     """Groq → OpenRouter free: chapters → scenes."""
     ch_json = json.dumps(chapters_data, indent=2)
     prompt = _safe_format(STAGE2_PROMPT, chapters_json=ch_json)
+    prompt += "\n\n" + FACTUAL_GENERATION_RULE
     print(f"  [Stage 2/5] Scene breakdown (Groq → OpenRouter)...", flush=True)
     text, model = _call_free_llm(prompt, temperature=0.6, max_tokens=16384)
     data = _extract_json(text) or {}
@@ -292,6 +295,7 @@ def stage3_enhance_scenes(chapters):
 
     sc_json = json.dumps(all_scenes, indent=2)
     prompt = _safe_format(STAGE3_PROMPT, scenes_json=sc_json)
+    prompt += "\n\n" + FACTUAL_GENERATION_RULE
     print(f"  [Stage 3/5] Scene enhancer (Groq → OpenRouter)...", flush=True)
 
     text, model = _call_free_llm(prompt, temperature=0.5, max_tokens=16384)
@@ -344,6 +348,7 @@ def stage4_hook_retention(title, chapters, key_points):
     kp_str = "; ".join(key_points[:6]) if key_points else ""
 
     prompt = _safe_format(STAGE4_PROMPT, title=title, chapters_summary=ch_summary, key_points=kp_str)
+    prompt += "\n\n" + FACTUAL_GENERATION_RULE
     print("  [Stage 4/5] Hook & retention (Groq → OpenRouter)...", flush=True)
     text, model = _call_free_llm(prompt, temperature=0.7, max_tokens=4096)
     data = _extract_json(text) or {}
@@ -399,6 +404,7 @@ def stage5_final_review(plan_dict):
     """Gemini search-grounded: fact-check, restructure, polish."""
     plan_json = json.dumps(plan_dict, indent=2, default=str)
     prompt = _safe_format(STAGE5_PROMPT, plan_json=plan_json[:8000])  # truncate if huge
+    prompt += "\n\n" + FACTUAL_GENERATION_RULE
     print("  [Stage 5/5] Final review & polish (Gemini search-grounded)...", flush=True)
     try:
         text, model = _call_gemini_review(prompt, temperature=0.25, max_tokens=16384)
