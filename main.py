@@ -264,15 +264,22 @@ def main():
             from src import youtube_upload
             url = youtube_upload.upload(final, plan["title"],
                                         plan["description"], plan["tags"], privacy,
-                                        hook=plan.get("hook"), comment=plan.get("comment"))
+                                        hook=plan.get("hook"), comment=plan.get("comment"),
+                                        episode_id="short:" + topic, ledger_dir="/tmp/youtube-upload-ledger")
             report["youtube_url"] = url
             with open("output/metadata.json", "w", encoding="utf-8") as f:
                 json.dump(report, f, indent=2, ensure_ascii=False)
             print(f"Uploaded: {url}", flush=True)
-            sheets.mark_done(item, url)
+            # Metadata, captions, playlist and a real UI pin are separate gates.
+            report["publication_state"] = "public_media_verified_stack_review_pending"
+            with open("output/metadata.json", "w", encoding="utf-8") as f:
+                json.dump(report, f, indent=2, ensure_ascii=False)
+            print("Public served media verified; publication stack review pending. Not marked done.")
+            return 1
         except Exception as e:
-            print(f"WARNING: upload failed ({e}) -- the rendered video is still "
+            print(f"ERROR: upload failed ({e}) -- the rendered video is still "
                   f"in output/final.mp4 and in the workflow artifact.")
+            return 1
 
     print("Done.", flush=True)
     return 0

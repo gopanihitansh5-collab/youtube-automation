@@ -923,7 +923,7 @@ def main():
             scene_idx += 1
         chapter_durations.append(ch_durs)
 
-    ch_ts = _chapter_timestamps(chapters)
+    ch_ts = ""  # Generated only after measured render, never from a plan grid.
     full_desc = plan.get("description", "")
     if ch_ts:
         full_desc += f"\n\n{ch_ts}"
@@ -949,6 +949,13 @@ def main():
             description=full_desc,
             tags=plan.get("tags", []),
         )
+    with open("output_long/timeline.json", encoding="utf-8") as f:
+        render_timeline = json.load(f)
+    measured_chapters = [{"title": ch["title"], "timestamp_sec": int(ch["start_sec"])}
+                         for ch in render_timeline["chapters"]]
+    ch_ts = _chapter_timestamps(measured_chapters)
+    if ch_ts:
+        full_desc += f"\n\n{ch_ts}"
     dur = probe_duration(final) if final and os.path.exists(final) else 0
     print(f"\nRendered: {final} ({dur:.1f}s)", flush=True)
     save_run_state("video_rendered", {"duration_sec": dur})
@@ -998,13 +1005,19 @@ def main():
             url = youtube_upload.upload(
                 final, plan["title"], full_desc, plan["tags"], privacy,
                 hook=plan.get("hook"), comment=plan.get("comment"),
+                episode_id="long:" + topic, ledger_dir="/tmp/youtube-upload-ledger",
             )
             report["youtube_url"] = url
             with open("output_long/metadata.json", "w", encoding="utf-8") as f:
                 json.dump(report, f, indent=2, ensure_ascii=False)
             print(f"Uploaded: {url}", flush=True)
             clear_stages(topic)
-            sheets.mark_done(item, url)
+            # Public playability and publish-stack review are a separate manual gate.
+            report["publication_state"] = "public_media_verified_stack_review_pending"
+            with open("output_long/metadata.json", "w", encoding="utf-8") as f:
+                json.dump(report, f, indent=2, ensure_ascii=False)
+            print("Public served media verified; publication stack review pending. Not marked done.")
+            return 1
         except Exception as e:
             # Upload is part of this workflow's promised outcome. Preserve the
             # rendered artifact, but fail the process so Actions cannot report

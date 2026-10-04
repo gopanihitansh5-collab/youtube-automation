@@ -1,0 +1,26 @@
+name: Manual encrypted upload-ledger smoke
+on:
+  workflow_dispatch: {}
+permissions:
+  contents: write
+concurrency:
+  group: youtube-upload
+  cancel-in-progress: false
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests 'cryptography>=42.0.0'
+      - name: Encrypted read/write and stale-revision rejection
+        env:
+          PYTHONPATH: .
+          UPLOAD_LEDGER_KEY: ${{ secrets.UPLOAD_LEDGER_KEY }}
+          UPLOAD_LEDGER_GITHUB_TOKEN: ${{ github.token }}
+          UPLOAD_LEDGER_REPO: ${{ github.repository }}
+          UPLOAD_LEDGER_BRANCH: private-upload-state
+        run: python scripts/probe_upload_ledger.py

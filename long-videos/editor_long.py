@@ -213,10 +213,10 @@ def _scene_visual_kind(visual):
 def _normalize(visual, dur, out, index):
     kind = _scene_visual_kind(visual)
     if kind == "video" and visual[0] and os.path.exists(visual[0]):
-        return _norm_video(visual[0], max(dur, 3.0), out)
+        return _norm_video(visual[0], dur, out)
     if kind == "image" and visual[0] and os.path.exists(visual[0]):
-        return _norm_image(visual[0], max(dur, 4.0), out, index)
-    return _norm_gradient(max(dur, 3.0), out, index)
+        return _norm_image(visual[0], dur, out, index)
+    return _norm_gradient(dur, out, index)
 
 
 def _concat_xfade(paths, out, xfade_dur=SCENE_XFADE_DUR,
@@ -294,7 +294,7 @@ CHAPTER_ASS_COLORS = [
 ]
 
 
-def _write_ass(chapter_scenes, chapter_durs, path):
+def _write_ass(chapter_scenes, chapter_durs, path, timeline=None):
     lines = []
     lines.append("[Script Info]")
     lines.append("ScriptType: v4.00+")
@@ -330,7 +330,9 @@ def _write_ass(chapter_scenes, chapter_durs, path):
     global_offset = 0.0
     for ci, (scenes, ch_dur) in enumerate(zip(chapter_scenes, chapter_durs)):
         color = CHAPTER_ASS_COLORS[ci % len(CHAPTER_ASS_COLORS)]
-        scene_offset = 0.0
+        if timeline:
+            global_offset = timeline['chapters'][ci]['start_sec']
+        scene_offset = timeline['chapters'][ci]['card_duration_sec'] if timeline else 0.0
         for si, words in enumerate(scenes):
             if not words:
                 scene_offset += ch_dur[si] if si < len(ch_dur) else 5.0
@@ -340,6 +342,8 @@ def _write_ass(chapter_scenes, chapter_durs, path):
                 raw = w[0].strip()
                 if not raw:
                     continue
+                if timeline:
+                    scene_offset = timeline['chapters'][ci]['scenes'][si]['start_sec'] - global_offset
                 start = global_offset + scene_offset + w[1]
                 end = global_offset + scene_offset + w[2]
                 if end - start < 0.3:
@@ -382,27 +386,47 @@ def _pick_music():
     return picked
 
 
-def _build_metadata(chapters, title, description, tags):
-    """Build FFmpeg metadata file for chapter markers + video metadata."""
-    lines = [";FFMETADATA1"]
-    lines.append(f"title={title}")
-    lines.append(f"description={description}")
-    if tags:
-        lines.append(f"comment=Tags: {', '.join(tags[:8])}")
-
+def measured_timeline(chapters, card_paths, scene_paths):
+    """One frame-aligned cut timeline drives visuals, audio, captions and chapters."""
+    timeline = {"chapters": [], "duration_sec": 0.0, "fps": FPS}
     offset = 0.0
-    for ch in chapters:
-        chapters_dur = sum(s.get("duration", 10.0)
-                          for s in ch.get("scenes", []))
-        ts_start = int(offset * 1000)
-        ts_end = int((offset + chapters_dur) * 1000)
-        lines.append("[CHAPTER]")
-        lines.append("TIMEBASE=1/1000")
-        lines.append(f"START={ts_start}")
-        lines.append(f"END={ts_end}")
-        lines.append(f"title={ch['title']}")
-        offset += chapters_dur
+    idx = 0
+    for ci, chapter in enumerate(chapters):
+        card = round(probe_duration(card_paths[ci]) * FPS) / FPS
+        entry = {"title": chapter["title"], "start_sec": offset,
+                 "card_duration_sec": card, "scenes": []}
+        offset += card
+        for _ in chapter["scenes"]:
+            duration = round(probe_duration(scene_paths[idx]) * FPS) / FPS
+            if duration <= 0:
+                raise ValueError("Measured scene duration unavailable")
+            entry["scenes"].append({"start_sec": offset, "duration_sec": duration})
+            offset += duration
+            idx += 1
+        entry["end_sec"] = offset
+        timeline["chapters"].append(entry)
+    if idx != len(scene_paths):
+        raise ValueError("Scene count differs from rendered timeline")
+    timeline["duration_sec"] = offset
+    return timeline
 
+
+def _meta_escape(value):
+    return str(value).replace("\\", "\\\\").replace("\n", "\\\n").replace("=", "\\=").replace(";", "\\;").replace("#", "\\#")
+
+
+def _build_metadata(chapters, title, description, tags, timeline=None):
+    if not timeline:
+        raise ValueError("Measured render timeline required for metadata")
+    lines = [";FFMETADATA1", f"title={_meta_escape(title)}",
+             f"description={_meta_escape(description)}"]
+    if tags:
+        lines.append(f"comment=Tags: {_meta_escape(', '.join(tags[:8]))}")
+    for ch in timeline["chapters"]:
+        lines += ["[CHAPTER]", "TIMEBASE=1/1000",
+                  f"START={round(ch['start_sec'] * 1000)}",
+                  f"END={round(ch['end_sec'] * 1000)}",
+                  f"title={_meta_escape(ch['title'])}"]
     meta_path = "output_long/metadata.ffmeta"
     os.makedirs("output_long", exist_ok=True)
     with open(meta_path, "w", encoding="utf-8") as f:
@@ -458,51 +482,33 @@ def build(chapters, scene_visuals, scene_audios, scene_words,
                 all_norm.append(norm[scene_idx])
             scene_idx += 1
 
-    print("  concat with cinematic transitions ...", flush=True)
-    card_count = len(chapters)
-    concat_dir = "output_long/concat"
-    os.makedirs(concat_dir, exist_ok=True)
+    # Cut boundaries preserve every narrated frame. Independent video-only
+    # crossfades shortened visuals while narration kept its full duration.
+    card_paths = [f"{chapter_card_dir}/card_{ci}.mp4" for ci in range(len(chapters))]
+    timeline = measured_timeline(chapters, card_paths, norm)
+    with open("output_long/timeline.json", "w", encoding="utf-8") as f:
+        json.dump(timeline, f, indent=2)
+    base_video = "output_long/base.mp4"
+    _run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i",
+          _listfile(all_norm, base_video), "-c:v", "copy", "-an", base_video])
 
-    segment_paths = []
-    current_segment = []
-    for ni, np_ in enumerate(all_norm):
-        current_segment.append(np_)
-
-        is_card = any(f"card_{c}" in np_ for c in range(card_count))
-        is_last = (ni == len(all_norm) - 1)
-        next_is_card = (ni + 1 < len(all_norm) and
-                        any(f"card_{c}" in all_norm[ni + 1]
-                            for c in range(card_count)))
-
-        if is_last or (is_card and len(current_segment) >= 2) or next_is_card:
-            if len(current_segment) >= 2:
-                t_style = rng.choice(TRANSITION_STYLES)
-                seg_out = f"{concat_dir}/seg_{len(segment_paths)}.mp4"
-                _concat_xfade(current_segment, seg_out,
-                              xfade_dur=SCENE_XFADE_DUR,
-                              transition_style=t_style)
-                segment_paths.append(seg_out)
-            else:
-                segment_paths.extend(current_segment)
-            current_segment = []
-
-    if current_segment:
-        segment_paths.extend(current_segment)
-
-    if len(segment_paths) > 1:
-        print("  concat chapter segments with cinematic crossfades ...",
-              flush=True)
-        base_video = _concat_xfade(segment_paths, "output_long/base.mp4",
-                                   xfade_dur=CHAPTER_XFADE_DUR,
-                                   transition_style="fade")
-    elif segment_paths:
-        base_video = segment_paths[0]
-    else:
-        raise ValueError("no video segments to concat")
-
-    flat_durs = [d for ch_durs in chapter_durations for d in ch_durs]
-    print("  concat audio (48kHz) ...", flush=True)
-    voice = _concat_audio(scene_audios, flat_durs, "output_long/voice.wav")
+    audio_paths, audio_durs = [], []
+    scene_idx = 0
+    for ci, ch in enumerate(timeline["chapters"]):
+        silence = f"output_long/card_silence_{ci}.wav"
+        _run(["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
+              "-t", str(ch["card_duration_sec"]), "-c:a", "pcm_s16le", silence])
+        audio_paths.append(silence)
+        audio_durs.append(ch["card_duration_sec"])
+        for scene in ch["scenes"]:
+            if not scene_audios[scene_idx]:
+                raise ValueError("Missing narration audio")
+            audio_paths.append(scene_audios[scene_idx])
+            audio_durs.append(scene["duration_sec"])
+            scene_idx += 1
+    voice = _concat_audio(audio_paths, audio_durs, "output_long/voice.wav")
+    measured_durs = [[scene["duration_sec"] for scene in ch["scenes"]]
+                     for ch in timeline["chapters"]]
 
     print("  writing captions (ASS, 48pt, per-chapter color) ...", flush=True)
     chapter_word_groups = []
@@ -516,7 +522,7 @@ def build(chapters, scene_visuals, scene_audios, scene_words,
                 ch_scene_words.append([])
             word_idx += 1
         chapter_word_groups.append(ch_scene_words)
-    _write_ass(chapter_word_groups, chapter_durations, "output_long/subs.ass")
+    _write_ass(chapter_word_groups, measured_durs, "output_long/subs.ass", timeline=timeline)
 
     vf = "subtitles=output_long/subs.ass"
 
@@ -562,7 +568,7 @@ def build(chapters, scene_visuals, scene_audios, scene_words,
         )
         audio_maps = "-map", "[a]"
 
-    meta_file = _build_metadata(chapters, title, description, tags or [])
+    meta_file = _build_metadata(chapters, title, description, tags or [], timeline=timeline)
 
     filter_complex = f"[0:v]{vf_color}[v]"
     cmd += [
@@ -581,7 +587,7 @@ def build(chapters, scene_visuals, scene_audios, scene_words,
         "-metadata", f"description={description[:200]}",
         "-metadata", "genre=Education",
         "-metadata", "comment=Brand: long-form educational deep dives",
-        "-shortest",
+        "-t", str(timeline["duration_sec"]),
         "-movflags", "+faststart",
         out_path,
     ]
@@ -601,6 +607,8 @@ def build(chapters, scene_visuals, scene_audios, scene_words,
 
     info = probe_info(out_path)
     final_dur = float(info.get("duration", 0))
+    if abs(final_dur - timeline["duration_sec"]) > 1 / FPS + 0.05:
+        raise ValueError("Final render duration differs from measured timeline")
     size_mb = int(info.get("size", 0)) / (1024 * 1024) if info.get("size") else 0
     bitrate = info.get("bit_rate", "?")
     print(f"  final video: {out_path} ({final_dur:.1f}s, {size_mb:.0f}MB, "

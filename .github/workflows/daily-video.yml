@@ -8,11 +8,11 @@ on:
   workflow_dispatch: {}
 
 concurrency:
-  group: daily-video
+  group: youtube-upload
   cancel-in-progress: false
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-and-post:
@@ -79,6 +79,10 @@ jobs:
           YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
           YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
           YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+          UPLOAD_LEDGER_KEY: ${{ secrets.UPLOAD_LEDGER_KEY }}
+          UPLOAD_LEDGER_GITHUB_TOKEN: ${{ github.token }}
+          UPLOAD_LEDGER_REPO: ${{ github.repository }}
+          UPLOAD_LEDGER_BRANCH: private-upload-state
           # premium voice (optional — falls through to edge-tts if unset)
           ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
         run: python main.py
