@@ -1,0 +1,57 @@
+name: Read-only generation quota probe
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Minimal existing-free-provider completions
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request, urllib.error
+          probes = [
+              ('groq', 'openai/gpt-oss-120b', 'GROQ_API_KEY', 'https://api.groq.com/openai/v1/chat/completions'),
+              ('groq', 'openai/gpt-oss-20b', 'GROQ_API_KEY', 'https://api.groq.com/openai/v1/chat/completions'),
+              ('openrouter', 'nvidia/nemotron-3-super-120b-a12b:free', 'OPENROUTER_API_KEY', 'https://openrouter.ai/api/v1/chat/completions'),
+          ]
+          results = []
+          for provider, model, env, url in probes:
+              row = {'provider': provider, 'model': model}
+              token = os.environ.get(env, '')
+              if not token:
+                  row['status'] = 'missing_secret'
+                  results.append(row)
+                  continue
+              body = {'model': model, 'messages': [{'role': 'user', 'content': 'Reply with OK only.'}], 'max_tokens': 16, 'temperature': 0}
+              req = urllib.request.Request(url, data=json.dumps(body).encode(), headers={'Authorization': 'Bearer '+token, 'Content-Type': 'application/json'})
+              try:
+                  with urllib.request.urlopen(req, timeout=75) as response:
+                      row['http_status'] = response.status
+                      payload = json.load(response)
+                      choices = payload.get('choices') or []
+                      message = choices[0].get('message', {}) if choices else {}
+                      content = message.get('content')
+                      row['nonempty_text'] = isinstance(content, str) and bool(content.strip())
+              except urllib.error.HTTPError as exc:
+                  row['http_status'] = exc.code
+                  row['retry_after'] = exc.headers.get('Retry-After')
+              except Exception as exc:
+                  row['status'] = 'transport_or_parse_error'
+                  row['error_type'] = type(exc).__name__
+              results.append(row)
+          out = {'scope': 'Three bounded 16-token completion probes only. No generation/render/upload or retries.', 'results': results}
+          with open('quota-probe.json', 'w') as f:
+              json.dump(out, f, indent=2)
+          print(json.dumps(out, indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: generation-quota-probe
+          path: quota-probe.json
+          retention-days: 3
