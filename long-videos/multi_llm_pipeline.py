@@ -1,10 +1,10 @@
 """Multi-LLM pipeline: free open-source models for generation, Gemini for final polish.
 
 Stages:
-  1. SCRIPT WRITER  — Groq → OpenRouter free (full narrative)
-  2. SCENE BREAKDOWN — Groq → OpenRouter free (narration + keywords)
-  3. SCENE ENHANCER  — Groq → OpenRouter free (cinematic visuals)
-  4. HOOK & RETENTION — Groq → OpenRouter free (hooks, CTA)
+  1. SCRIPT WRITER  — OpenRouter → Groq free (full narrative)
+  2. SCENE BREAKDOWN — OpenRouter → Groq free (narration + keywords)
+  3. SCENE ENHANCER  — OpenRouter → Groq free (cinematic visuals)
+  4. HOOK & RETENTION — OpenRouter → Groq free (hooks, CTA)
   5. FINAL REVIEW    — Gemini search-grounded (fact-check, restructure, quality polish)
 """
 import os
@@ -50,7 +50,7 @@ def _extract_json_array(text):
 
 
 # ─── Provider Callers ────────────────────────────────────────────────
-# Order: Groq → OpenRouter (free) → Gemini (final review only)
+# Order: OpenRouter free (Nemotron preferred) → Groq → Gemini (final review only)
 
 from free_models import (GROQ_MODELS as FREE_GROQ_MODELS, GEMINI_MODELS as FREE_GEMINI_MODELS,
                          OPENROUTER_FALLBACK, openrouter_free_models)
@@ -93,6 +93,8 @@ def _call_openrouter(prompt, temperature=0.7, max_tokens=12288, timeout=300):
     if not key:
         raise RuntimeError("OPENROUTER_API_KEY not set")
     live = openrouter_free_models()
+    preferred = "nvidia/nemotron-3-super-120b-a12b:free"
+    live = ([preferred] if preferred in live else []) + [m for m in live if m != preferred]
     chain = [m for m in live if fits_in_context(prompt, m, "openrouter", max_tokens)] or live
     last_err = None
     for model in chain:
@@ -117,12 +119,12 @@ def _call_openrouter(prompt, temperature=0.7, max_tokens=12288, timeout=300):
 
 
 def _call_free_llm(prompt, temperature=0.7, max_tokens=12288, timeout=300):
-    """Try Groq first, then OpenRouter free as fallback."""
+    """Try OpenRouter free first; Groq is an unproven fallback."""
     try:
-        return _call_groq(prompt, temperature, max_tokens, timeout)
-    except Exception as e:
-        print(f"  Groq unavailable ({e}) → OpenRouter", flush=True)
         return _call_openrouter(prompt, temperature, max_tokens, timeout)
+    except Exception as e:
+        print(f"  OpenRouter unavailable ({e}) → Groq fallback", flush=True)
+        return _call_groq(prompt, temperature, max_tokens, timeout)
 
 
 def _call_gemini_review(prompt, temperature=0.3, max_tokens=16384, timeout=300):
@@ -195,13 +197,13 @@ HUMAN AUTHENTICITY RULES:
 
 
 def stage1_write_script(topic, trending_context=None):
-    """Groq → OpenRouter free: full narrative script."""
+    """OpenRouter → Groq free: full narrative script."""
     ctx = ""
     if trending_context and trending_context.get("context_block"):
         ctx = "\nCURRENT CONTEXT:\n" + trending_context["context_block"]
     prompt = _safe_format(STAGE1_PROMPT, topic=topic, trending_context=ctx)
     prompt += "\n\n" + FACTUAL_GENERATION_RULE
-    print("  [Stage 1/5] Script writer (Groq → OpenRouter)...", flush=True)
+    print("  [Stage 1/5] Script writer (OpenRouter → Groq)...", flush=True)
     text, model = _call_free_llm(prompt, temperature=0.75, max_tokens=16384)
     data = _extract_json(text) or {}
     chapters = data.get("chapters", [])
@@ -246,11 +248,11 @@ Rules:
 
 
 def stage2_breakdown_scenes(chapters_data):
-    """Groq → OpenRouter free: chapters → scenes."""
+    """OpenRouter → Groq free: chapters → scenes."""
     ch_json = json.dumps(chapters_data, indent=2)
     prompt = _safe_format(STAGE2_PROMPT, chapters_json=ch_json)
     prompt += "\n\n" + FACTUAL_GENERATION_RULE
-    print(f"  [Stage 2/5] Scene breakdown (Groq → OpenRouter)...", flush=True)
+    print(f"  [Stage 2/5] Scene breakdown (OpenRouter → Groq)...", flush=True)
     text, model = _call_free_llm(prompt, temperature=0.6, max_tokens=16384)
     data = _extract_json(text) or {}
     chapters = data.get("chapters", [])
@@ -282,7 +284,7 @@ Pure JSON array. No markdown.
 
 
 def stage3_enhance_scenes(chapters):
-    """Groq → OpenRouter free: enhance visual keywords."""
+    """OpenRouter → Groq free: enhance visual keywords."""
     all_scenes = []
     scene_map = []
     for ci, ch in enumerate(chapters):
@@ -296,7 +298,7 @@ def stage3_enhance_scenes(chapters):
     sc_json = json.dumps(all_scenes, indent=2)
     prompt = _safe_format(STAGE3_PROMPT, scenes_json=sc_json)
     prompt += "\n\n" + FACTUAL_GENERATION_RULE
-    print(f"  [Stage 3/5] Scene enhancer (Groq → OpenRouter)...", flush=True)
+    print(f"  [Stage 3/5] Scene enhancer (OpenRouter → Groq)...", flush=True)
 
     text, model = _call_free_llm(prompt, temperature=0.5, max_tokens=16384)
     enhanced = _extract_json_array(text)
@@ -343,13 +345,13 @@ Pure JSON. No markdown.
 
 
 def stage4_hook_retention(title, chapters, key_points):
-    """Groq → OpenRouter free: hooks, CTA, retention."""
+    """OpenRouter → Groq free: hooks, CTA, retention."""
     ch_summary = "; ".join(f"{c.get('title','?')} ({len(c.get('scenes',[]))}s)" for c in chapters)
     kp_str = "; ".join(key_points[:6]) if key_points else ""
 
     prompt = _safe_format(STAGE4_PROMPT, title=title, chapters_summary=ch_summary, key_points=kp_str)
     prompt += "\n\n" + FACTUAL_GENERATION_RULE
-    print("  [Stage 4/5] Hook & retention (Groq → OpenRouter)...", flush=True)
+    print("  [Stage 4/5] Hook & retention (OpenRouter → Groq)...", flush=True)
     text, model = _call_free_llm(prompt, temperature=0.7, max_tokens=4096)
     data = _extract_json(text) or {}
     print(f"  → hook via {model}", flush=True)
@@ -464,7 +466,7 @@ def _fix_from_review(plan, review_results):
 def run_full_pipeline(topic, trending_context=None):
     """Run all 5 stages with independent reviewer agents verifying each stage.
     
-    Free models (Groq→OpenRouter) for generation, Gemini for final polish,
+    Free models (OpenRouter→Groq) for generation, Gemini for final polish,
     reviewer agents (separate LLM calls) verifying every stage output.
     """
     from longform_prompt import build_offline_long_script

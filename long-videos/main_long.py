@@ -633,6 +633,8 @@ def _openrouter_long(topic, prompt, temperature):
         raise RuntimeError("OPENROUTER_API_KEY not set")
     last_err = None
     models_to_try = openrouter_free_models()
+    preferred = "nvidia/nemotron-3-super-120b-a12b:free"
+    models_to_try = ([preferred] if preferred in models_to_try else []) + [m for m in models_to_try if m != preferred]
     for model in models_to_try:
         try:
             print(f"    OpenRouter trying {model} (prompt ~{estimate_tokens(prompt)}t)", flush=True)
@@ -765,12 +767,12 @@ def _generate_long_plan(topic, topic_ctx=None):
           f"scenes/ch: {meta['scenes_per_chapter']} | temp: {temp}", flush=True)
 
     chain = []
-    if os.environ.get("GEMINI_API_KEY"):
-        chain.append(("gemini-search", lambda: _gemini_search_long(topic, dyn_prompt, temp)))
-    if os.environ.get("GROQ_API_KEY"):
-        chain.append(("groq-gpt-oss", lambda: _groq_long(topic, dyn_prompt, temp)))
     if os.environ.get("OPENROUTER_API_KEY"):
         chain.append(("openrouter-free", lambda: _openrouter_long(topic, dyn_prompt, temp)))
+    if os.environ.get("GROQ_API_KEY"):
+        chain.append(("groq-gpt-oss", lambda: _groq_long(topic, dyn_prompt, temp)))
+    if os.environ.get("GEMINI_API_KEY"):
+        chain.append(("gemini-search", lambda: _gemini_search_long(topic, dyn_prompt, temp)))
     if os.environ.get("HF_TOKEN"):
         chain.append(("huggingface-router", lambda: _huggingface_long(topic, dyn_prompt, temp)))
     chain.append(("offline-builder", lambda: build_offline_long_script(topic, meta)))
