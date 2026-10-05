@@ -14,7 +14,10 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
           python - <<'PY'
-          import json, os, urllib.request, urllib.error
+          import json, os, re, urllib.request, urllib.error
+          def safe_code(value):
+              # Codes only. Never log provider messages, response bodies or tokens.
+              return value if isinstance(value, (int, float)) or (isinstance(value, str) and re.fullmatch(r'[A-Za-z0-9_.:-]{1,80}', value)) else None
           probes = [
               ('groq', 'openai/gpt-oss-120b', 'GROQ_API_KEY', 'https://api.groq.com/openai/v1/chat/completions'),
               ('groq', 'openai/gpt-oss-20b', 'GROQ_API_KEY', 'https://api.groq.com/openai/v1/chat/completions'),
@@ -38,9 +41,27 @@ jobs:
                       message = choices[0].get('message', {}) if choices else {}
                       content = message.get('content')
                       row['nonempty_text'] = isinstance(content, str) and bool(content.strip())
+                      row['finish_reason'] = safe_code(choices[0].get('finish_reason')) if choices else None
+                      usage = payload.get('usage') or {}
+                      row['usage'] = {key: usage[key] for key in ('prompt_tokens', 'completion_tokens', 'total_tokens') if isinstance(usage.get(key), (int, float))}
+                      details = usage.get('completion_tokens_details') or {}
+                      if isinstance(details.get('reasoning_tokens'), (int, float)):
+                          row['reasoning_tokens'] = details['reasoning_tokens']
+                      row['reasoning_present'] = bool(message.get('reasoning') or message.get('reasoning_details'))
               except urllib.error.HTTPError as exc:
                   row['http_status'] = exc.code
-                  row['retry_after'] = exc.headers.get('Retry-After')
+                  row['retry_after_seconds'] = int(exc.headers['Retry-After']) if (exc.headers.get('Retry-After') or '').isdigit() else None
+                  row['response_content_type'] = (exc.headers.get('Content-Type') or '').split(';')[0] if (exc.headers.get('Content-Type') or '').split(';')[0] in ('application/json', 'text/html', 'text/plain') else 'other'
+                  try:
+                      error_payload = json.loads(exc.read(16384))
+                      error = error_payload.get('error') or {}
+                      if isinstance(error, dict):
+                          row['provider_error_code'] = safe_code(error.get('code'))
+                          row['provider_error_type'] = safe_code(error.get('type'))
+                  except Exception:
+                      row['provider_error_parse'] = 'non_json_or_unrecognized'
+                  # 403 alone does not distinguish authorization from a gateway block.
+                  row['classification'] = 'rate_limited' if exc.code == 429 else ('unauthorized' if exc.code == 401 else 'unknown')
               except Exception as exc:
                   row['status'] = 'transport_or_parse_error'
                   row['error_type'] = type(exc).__name__
