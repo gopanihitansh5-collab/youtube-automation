@@ -391,6 +391,15 @@ def _llm_suggest_trending_topic():
 
 def _get_topic():
     global _TOPIC_CTX
+    override = os.environ.get("LONG_TOPIC_OVERRIDE", "").strip()
+    if override:
+        if os.environ.get("SKIP_UPLOAD") != "1" or os.environ.get("FRESH_SCRIPT") != "1":
+            raise ValueError("Topic override requires fresh private preproduction")
+        item = {"row_idx": None, "source": "private-topic-override", "topic": override,
+                "voice": "en-US-AriaNeural", "privacy": "private"}
+        _TOPIC_CTX = parse_topic_context(item, "private-topic-override")
+        store_context(_TOPIC_CTX)
+        return item
     has_sheet = _sheet_available()
 
     candidate_item = None
