@@ -709,6 +709,91 @@ def _save_rejected_plan(plan, topic, llm_used, gate, reason):
                    "llm_used": llm_used, "gate": gate, "reason": reason,
                    "plan": plan}, handle, indent=2, ensure_ascii=False)
 
+def _storyboard_first_plan(topic, topic_ctx=None):
+    """Two free-provider authoring passes; no quality retry or gate bypass."""
+    from multi_llm_pipeline import _call_openrouter, _call_groq
+    evidence = topic_ctx.to_dict() if topic_ctx is not None else {}
+
+    def call(prompt, tokens):
+        errors = []
+        for provider in (_call_openrouter, _call_groq):
+            try:
+                text, model = provider(prompt, temperature=0.45, max_tokens=tokens)
+                if not isinstance(text, str) or not text.strip():
+                    raise ValueError("empty provider content")
+                return _extract_json(text), model
+            except Exception as exc:
+                errors.append(str(exc))
+        raise RuntimeError("Free storyboard providers unavailable: " + "; ".join(errors))
+
+    rules = ("Use only supplied factual context and qualitative mechanisms. No invented "
+             "statistics, benchmarks, quotations, measured examples or citations. Label "
+             "hypothetical examples. No AI-like transitional filler. A diagram is an "
+             "illustration, never documentary evidence. Stock footage keywords must "
+             "truthfully describe an available establishing shot, not pretend a stock "
+             "clip demonstrates a technical mechanism. No paid providers.")
+    prompt = ("PASS 1: Plan a complete 8-10 minute explanatory storyboard, not narration. "
+              "Return pure JSON with title, hook, chapters. Exactly 5 chapters, each with "
+              "claim, visual_concept, transition_plan and exactly 4 scenes. Each scene "
+              "has scene_id, claim, diagram_description (objects, labels, arrows, "
+              "ordered state changes), keyword (short searchable real-world stock "
+              "establishing shot), visual_source_notes (stock versus original schematic "
+              "and factual source provenance). Distinct scenes should advance the "
+              "mechanism, not repeat it. Plan concrete details, not 'show a diagram'. "
+              + rules + "\nTOPIC: " + topic + "\nCONTEXT: " + json.dumps(evidence))
+    board, model1 = call(prompt, 7000)
+    chapters = board.get("chapters", [])
+    if len(chapters) != 5 or any(len(c.get("scenes", [])) != 4 for c in chapters):
+        raise ValueError("Storyboard must contain five developed four-scene chapters")
+    for chapter in chapters:
+        for key in ("claim", "visual_concept", "transition_plan"):
+            if not str(chapter.get(key, "")).strip():
+                raise ValueError("Incomplete chapter storyboard")
+        for scene in chapter["scenes"]:
+            for key in ("scene_id", "claim", "diagram_description", "keyword", "visual_source_notes"):
+                if not str(scene.get(key, "")).strip():
+                    raise ValueError("Incomplete scene storyboard")
+    os.makedirs("output_long", exist_ok=True)
+    with open("output_long/storyboard.json", "w", encoding="utf-8") as handle:
+        json.dump(board, handle, indent=2, ensure_ascii=False)
+    print(f"  storyboard pass: 5 chapters, 20 scene briefs via {model1}", flush=True)
+    prompt = ("PASS 2: Write the spoken script against this exact storyboard. Return "
+              "pure JSON with title, description, tags, hook, comment, virality_score, "
+              "attention_score, authenticity_score, chapters. Preserve 5 chapters and "
+              "4 scenes each in storyboard order. Each chapter has title and scenes. "
+              "Each scene has scene_id, narration (55-65 words, substantive natural "
+              "spoken explanation), keyword, diagram_description, visual_source_notes, "
+              "transition_plan, energy. Preserve the explicit diagram and provenance "
+              "briefs; expand state changes where needed. Explain what each arrow and "
+              "cache state means in the narration. No single-scene chapters, no empty "
+              "bridges or repeated 'now that we' / 'let us' introductions. Around "
+              "1100-1300 total words. Use example labels in narration when hypothetical. "
+              + rules + "\nCONTEXT: " + json.dumps(evidence) +
+              "\nSTORYBOARD: " + json.dumps(board, ensure_ascii=False))
+    raw, model2 = call(prompt, 14000)
+    plan = _validate_long(raw, topic)
+    if len(plan["chapters"]) != 5 or any(len(c["scenes"]) != 4 for c in plan["chapters"]):
+        raise ValueError("Script departed from developed storyboard structure")
+    words = 0
+    for ci, chapter in enumerate(plan["chapters"]):
+        for si, scene in enumerate(chapter["scenes"]):
+            original = board["chapters"][ci]["scenes"][si]
+            if str(scene.get("scene_id")) != str(original["scene_id"]):
+                raise ValueError("Script scene order departed from storyboard")
+            for key in ("diagram_description", "visual_source_notes"):
+                if not str(scene.get(key, "")).strip():
+                    raise ValueError("Script omitted concrete visual specification")
+            count = len(scene["narration"].split())
+            if not 45 <= count <= 90:
+                raise ValueError("Script scene narration is too thin or too long")
+            words += count
+    if not 1000 <= words <= 1400:
+        raise ValueError("Script duration budget departed from storyboard")
+    plan["storyboard"] = board
+    print(f"  script pass: 20 developed scenes, {words} words via {model2}", flush=True)
+    return plan, f"storyboard-first:{model1}->{model2}", {"authoring": "storyboard-first"}
+
+
 def _generate_long_plan(topic, topic_ctx=None):
     import random
     if topic_ctx is None:
@@ -722,6 +807,13 @@ def _generate_long_plan(topic, topic_ctx=None):
             clear_cache()
         clear_stages(topic)
         print("  fresh script: cleared selected topic checkpoints", flush=True)
+
+    # Explicit fresh private work uses storyboard-first authoring, then the same gate.
+    if os.environ.get("LONG_TOPIC_OVERRIDE", "").strip():
+        plan, chain, meta = _storyboard_first_plan(topic, topic_ctx)
+        cache_script(plan, topic, chain)
+        save_run_state("script_generated", {"topic": topic, "llm": chain})
+        return plan, chain, meta
 
     # Check if we already have a cached script
     cached = load_cached_script()
