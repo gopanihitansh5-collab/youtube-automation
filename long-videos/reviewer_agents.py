@@ -464,6 +464,9 @@ def review_pacing(chapters):
 
 def run_all_reviewers(title, hook, chapters, parallel=True, topic_context=None, paragraph_stage=False):
     """Run all 5 reviewer agents, optionally in parallel."""
+    # Normalize structured context once before reviewers serialize their prompts.
+    if topic_context is not None and hasattr(topic_context, "to_dict"):
+        topic_context = topic_context.to_dict()
     results = {}
 
     def _run_script():
