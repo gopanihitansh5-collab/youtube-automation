@@ -208,9 +208,12 @@ def review_script(title, hook, chapters, topic_context=None):
 
 REVIEW_SCENES_PROMPT = """You are a visual director reviewing scene keywords. Check:
 
-1. UNIQUENESS — Every keyword must have a COMPLETELY UNIQUE subject + camera angle + lighting combo
-2. DIVERSITY — No two scenes describe the same visual concept
-3. CINEMATIC QUALITY — Each keyword should specify: camera angle, lighting, color palette
+1. UNIQUENESS — Every executed visual must advance a distinct subject or explanatory state.
+2. DIVERSITY — Flag repeated visual concepts, including the same graph with renamed titles.
+3. CINEMATIC QUALITY — Read camera, lighting and framing in production_brief, NOT in stock search words.
+For authored_diagram inspect nodes, labeled arrows and ordered steps against narration.
+A different search phrase or color cannot disguise a repeated explanation. Diagrams are
+original schematics, not stock, scans, measurements or proof. Keep the >=7 pass bar.
 
 FIND DUPLICATE / SIMILAR keywords and flag them.
 
@@ -239,7 +242,12 @@ def review_scenes_unique(chapters):
             if not isinstance(kw, str) or not kw.strip():
                 return _unavailable_review("Missing scene keyword")
             kw = kw.strip()
-            keywords.append(f"  Ch{ci}-Sc{si}: {kw}")
+            try:
+                from src.explanatory_motion import review_brief
+                brief = review_brief(s)
+            except ValueError as exc:
+                return _unavailable_review(exc)
+            keywords.append(f"  Ch{ci}-Sc{si}: " + json.dumps(brief, ensure_ascii=False))
 
     if not keywords:
         return _unavailable_review("Reviewer evidence unavailable or no reviewable scenes")
@@ -353,37 +361,62 @@ Pure JSON.
 
 
 def review_visual_feasibility(chapters):
-    """Agent 4: Check if stock footage exists for each scene keyword."""
-    kws = []
-    for ci, c in enumerate(chapters):
-        for si, s in enumerate(c.get("scenes", [])):
-            kw = s.get("keyword", "")[:120]
-            if kw:
-                kws.append(f"[{len(kws)}] {kw}")
+    """Independently gate both lanes, never average away an infeasible stock shot.
 
-    if not kws:
-        return _unavailable_review("Reviewer evidence unavailable or no reviewable scenes")
-
-    prompt = REVIEW_VISUALS_PROMPT.format(keywords="\n".join(kws[:30]))
+    Existing stock reviewer and >=7 enforcement unchanged. Schematics receive an
+    additional review of the actual executable spec at the same threshold.
+    """
+    from src.explanatory_motion import review_brief
+    stocks, diagrams = [], []
+    index = 0
     try:
-        text, model = _call_reviewer(prompt)
-        data = _review_data(text, 7)
-        passed = data.get("pass", True)
-        coverage = data.get("predicted_coverage", 80)
-        hard = data.get("hard_to_find", [])
-        print(f"  [Reviewer] Visual feasibility: {coverage}% coverage, "
-              f"{len(hard)} hard-to-find, pass={passed} via {model}", flush=True)
-        return {
-            "passed": passed,
-            "score": data.get("score", 8),
-            "hard_to_find": hard,
-            "predicted_coverage": coverage,
-            "suggestions": data.get("suggestions", []),
-            "model": model,
-        }
-    except Exception as e:
-        print(f"  [Reviewer] Visual review unavailable: {e}", flush=True)
+        for chapter in chapters:
+            for scene in chapter.get("scenes", []):
+                brief = review_brief(scene)
+                if brief["visual_type"] == "authored_diagram":
+                    diagrams.append({"scene_index": index, **brief})
+                else:
+                    kw = scene.get("keyword")
+                    if not isinstance(kw, str) or not kw.strip():
+                        raise ValueError("Missing stock keyword")
+                    stocks.append(f"[{index}] {kw}")
+                index += 1
+    except ValueError as exc:
+        return _unavailable_review(exc)
+    if not stocks and not diagrams:
         return _unavailable_review("Reviewer evidence unavailable or no reviewable scenes")
+    results = []
+    try:
+        if stocks:
+            prompt = REVIEW_VISUALS_PROMPT.format(keywords="\n".join(stocks))
+            text, model = _call_reviewer(prompt)
+            data = _review_data(text, 7)
+            results.append({**data, "model": model, "lane": "stock"})
+        if diagrams:
+            prompt = ("Review executable original schematic specs, NOT stock keywords. "
+                      "Each scene must be feasible with a fixed horizontal node/arrow "
+                      "renderer: 2-4 nodes, labeled directed arrows and 2-4 narrated "
+                      "highlight states. Assess whether each spec actually explains its "
+                      "narration, has a distinct visual purpose and clear step ordering. "
+                      "Reject unsupported causal arrows, fabricated measurements, graphs "
+                      "pretending to be brain scans, missing uncertainty/provenance or "
+                      "a title card instead of an explanation. Do not award feasibility "
+                      "just because JSON validates. Return ONLY JSON with pass (boolean), "
+                      "score (0-10; pass only >=7), hard_to_find (original scene indices "
+                      "which are not executable), predicted_coverage (0-100), suggestions. "
+                      "SCENES: " + json.dumps(diagrams, ensure_ascii=False))
+            text, model = _call_reviewer(prompt)
+            data = _review_data(text, 7)
+            results.append({**data, "model": model, "lane": "authored_diagram"})
+        return {"passed": all(r["pass"] for r in results),
+                "score": min(r["score"] for r in results),
+                "hard_to_find": [i for r in results for i in r.get("hard_to_find", [])],
+                "predicted_coverage": min(r.get("predicted_coverage", 80) for r in results),
+                "suggestions": [s for r in results for s in r.get("suggestions", [])],
+                "model": "+".join(r["model"] for r in results), "lanes": results}
+    except Exception as exc:
+        print(f"  [Reviewer] Visual review unavailable: {exc}", flush=True)
+        return _unavailable_review("Reviewer evidence unavailable or malformed")
 
 
 # ─── Agent 5: Duration & Pacing ──────────────────────────────────────

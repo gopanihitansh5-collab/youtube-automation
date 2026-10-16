@@ -59,6 +59,7 @@ from multi_llm_pipeline import run_full_pipeline
 
 # Module-level cache for trending context (populated by _get_topic, consumed by _generate_long_plan)
 _TRENDING_CTX = {"region_data": [], "best_video_topic": None, "global_pulse": ""}
+_GEMINI_DONE_THIS_GENERATION = False
 _TOPIC_CTX: TopicContext | None = None  # parsed topic context, used by all pipeline stages
 
 LONG_CSV = os.path.join(os.path.dirname(__file__), "topics_long.csv")
@@ -728,7 +729,8 @@ def _storyboard_first_plan(topic, topic_ctx=None):
                 errors.append(str(exc))
         raise RuntimeError("Free storyboard providers unavailable: " + "; ".join(errors))
 
-    rules = ("Use only supplied factual context and qualitative mechanisms. No invented "
+    from src.explanatory_motion import VISUAL_RULES
+    rules = VISUAL_RULES + ("Use only supplied factual context and qualitative mechanisms. No invented "
              "statistics, benchmarks, quotations, measured examples or citations. Label "
              "hypothetical examples. No AI-like transitional filler. A diagram is an "
              "illustration, never documentary evidence. Stock footage keywords must "
@@ -738,7 +740,7 @@ def _storyboard_first_plan(topic, topic_ctx=None):
               "Return pure JSON with title, hook, chapters. Exactly 5 chapters, each with "
               "claim, visual_concept, transition_plan and exactly 4 scenes. Each scene "
               "has scene_id, claim, diagram_description (objects, labels, arrows, "
-              "ordered state changes), keyword (short searchable real-world stock "
+              "ordered state changes), visual_type, diagram_spec, production_brief, keyword (short searchable real-world stock "
               "establishing shot), visual_source_notes (stock versus original schematic "
               "and factual source provenance). Distinct scenes should advance the "
               "mechanism, not repeat it. Plan concrete details, not 'show a diagram'. "
@@ -752,9 +754,11 @@ def _storyboard_first_plan(topic, topic_ctx=None):
             if not str(chapter.get(key, "")).strip():
                 raise ValueError("Incomplete chapter storyboard")
         for scene in chapter["scenes"]:
-            for key in ("scene_id", "claim", "diagram_description", "keyword", "visual_source_notes"):
+            for key in ("scene_id", "claim", "keyword", "visual_source_notes"):
                 if not str(scene.get(key, "")).strip():
                     raise ValueError("Incomplete scene storyboard")
+            from src.explanatory_motion import validate_scene
+            validate_scene(scene)
     os.makedirs("output_long", exist_ok=True)
     with open("output_long/storyboard.json", "w", encoding="utf-8") as handle:
         json.dump(board, handle, indent=2, ensure_ascii=False)
@@ -764,7 +768,7 @@ def _storyboard_first_plan(topic, topic_ctx=None):
               "attention_score, authenticity_score, chapters. Preserve 5 chapters and "
               "4 scenes each in storyboard order. Each chapter has title and scenes. "
               "Each scene has scene_id, narration (55-65 words, substantive natural "
-              "spoken explanation), keyword, diagram_description, visual_source_notes, "
+              "spoken explanation), keyword, visual_type, diagram_spec, production_brief, diagram_description, visual_source_notes, "
               "transition_plan, energy. Preserve the explicit diagram and provenance "
               "briefs; expand state changes where needed. Explain what each arrow and "
               "cache state means in the narration. No single-scene chapters, no empty "
@@ -785,7 +789,9 @@ def _storyboard_first_plan(topic, topic_ctx=None):
             original = board["chapters"][ci]["scenes"][si]
             if str(scene.get("scene_id")) != str(original["scene_id"]):
                 raise ValueError("Script scene order departed from storyboard")
-            for key in ("diagram_description", "visual_source_notes"):
+            from src.explanatory_motion import validate_scene
+            validate_scene(scene)
+            for key in ("visual_source_notes",):
                 if not str(scene.get(key, "")).strip():
                     raise ValueError("Script omitted concrete visual specification")
             count = len(scene["narration"].split())
@@ -800,6 +806,8 @@ def _storyboard_first_plan(topic, topic_ctx=None):
 
 
 def _generate_long_plan(topic, topic_ctx=None):
+    global _GEMINI_DONE_THIS_GENERATION
+    _GEMINI_DONE_THIS_GENERATION = False
     import random
     if topic_ctx is None:
         topic_ctx = _TOPIC_CTX
@@ -858,6 +866,7 @@ def _generate_long_plan(topic, topic_ctx=None):
                       f"{total_scenes} scenes via {llm_chain}", flush=True)
                 cache_script(plan, topic, llm_chain)
                 save_run_state("script_generated", {"topic": topic, "llm": llm_chain})
+                _GEMINI_DONE_THIS_GENERATION = True
                 return plan, llm_chain, plan.get("meta", {})
             print(f"  multi-LLM pipeline: only {total_scenes} scenes (<15), falling back",
                   flush=True)
@@ -934,6 +943,13 @@ def main():
     save_run_state("topic_selected", {"topic": topic, "source": item["source"]})
 
     plan, llm_used, meta = _generate_long_plan(topic, topic_ctx=_TOPIC_CTX)
+    # Required final Gemini review applies to every authoring path, including
+    # storyboard, restored script and single-provider fallbacks. No bypass on 429.
+    if not _GEMINI_DONE_THIS_GENERATION:
+        from multi_llm_pipeline import stage5_final_review
+        evidence = _TOPIC_CTX.to_dict() if _TOPIC_CTX else {}
+        plan, final_model = stage5_final_review(plan, evidence)
+        llm_used += " -> " + final_model
     report["providers"]["script"] = llm_used
 
     # Every generation path, including single-provider and cached plans, needs
@@ -1005,7 +1021,7 @@ def main():
         i, sc = i_sc
         return visuals.get_visual(
             sc["keyword"], f"output_long/vis_{i}", scene_index=i,
-            orientation="landscape", scene_text=sc.get("narration", ""),
+            orientation="landscape", scene_text=sc.get("narration", ""), scene=sc,
         )
 
     voice_results = [None] * len(all_scenes)
@@ -1039,6 +1055,10 @@ def main():
                 print(f"  WARNING: visual scene {i} failed: {e}", flush=True)
                 visual_results[i] = (None, None, "gradient-fallback")
 
+    for i, sc in enumerate(all_scenes):
+        if sc.get("visual_type") == "authored_diagram" and (
+                not visual_results[i] or visual_results[i][1] != "authored-motion"):
+            raise RuntimeError(f"Authored diagram {i} failed; no visual substitution allowed")
     _FAILURE_STAGE = "render"
     scene_audios, scene_words, durations, voice_used = [], [], [], set()
     for i, res in enumerate(voice_results):
@@ -1057,7 +1077,11 @@ def main():
     for i, (path, kind, used) in enumerate(visual_results):
         scene_visuals.append((path, kind, used))
         report["scenes"].append({"keyword": all_scenes[i]["keyword"],
-                                 "visual": used})
+                                 "visual": used,
+                                 "visual_type": all_scenes[i].get("visual_type", "stock"),
+                                 "diagram_spec": all_scenes[i].get("diagram_spec"),
+                                 "production_brief": all_scenes[i].get("production_brief"),
+                                 "visual_source_notes": all_scenes[i].get("visual_source_notes")})
         print(f"  scene {i}: visual={used}", flush=True)
 
     chapter_durations = []

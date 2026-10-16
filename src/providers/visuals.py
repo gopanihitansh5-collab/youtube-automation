@@ -194,7 +194,7 @@ def _download(url, out_path, timeout=180):
 _PEXELS_PER_PAGE = 80
 
 
-def _pexels(keyword, scene_index, out_path, orientation="portrait"):
+def _pexels(keyword, scene_index, out_path, orientation="portrait", literal_query=False):
     key = os.environ["PEXELS_API_KEY"]
     used = _load_used()
 
@@ -209,7 +209,7 @@ def _pexels(keyword, scene_index, out_path, orientation="portrait"):
             print(f"      waiting {wait}s before retry ...", flush=True)
             time.sleep(wait)
 
-        seeded = _augment_keyword(keyword, scene_index + attempt * 100)
+        seeded = keyword if literal_query else _augment_keyword(keyword, scene_index + attempt * 100)
         print(
             f"      attempt {attempt + 1}/3: query={seeded!r}",
             flush=True,
@@ -288,7 +288,7 @@ def _pexels(keyword, scene_index, out_path, orientation="portrait"):
 _PIXABAY_PER_PAGE = 80
 
 
-def _pixabay(keyword, scene_index, out_path):
+def _pixabay(keyword, scene_index, out_path, literal_query=False):
     key = os.environ.get("PIXABAY_API_KEY", "")
     if not key:
         raise RuntimeError("PIXABAY_API_KEY not set")
@@ -305,7 +305,7 @@ def _pixabay(keyword, scene_index, out_path):
             print(f"      waiting {wait}s before retry ...", flush=True)
             time.sleep(wait)
 
-        seeded = _augment_keyword(keyword, scene_index + attempt * 100 + 50)
+        seeded = keyword if literal_query else _augment_keyword(keyword, scene_index + attempt * 100 + 50)
         print(
             f"      attempt {attempt + 1}/3: query={seeded!r}",
             flush=True,
@@ -374,14 +374,25 @@ def _pixabay(keyword, scene_index, out_path):
 
 
 # ----------------------------------------------------------------- public
-def get_visual(keyword, out_base, scene_index=0, orientation="portrait", scene_text=""):
-    """Return (path, kind, provider_name). Never raises -- gradient always works.
+def get_visual(keyword, out_base, scene_index=0, orientation="portrait", scene_text="", scene=None):
+    """Return (path, kind, provider_name). Stock can fall back to gradient.
+
+    Explicit authored scenes validate or raise, never silently change visual type.
 
     Walks the provider chain in order, caching failures per keyword so we
     don't retry a provider for the same keyword within a single run.
     orientation: "portrait" (9:16 Shorts) or "landscape" (16:9 long-form).
     scene_text: optional narration context for generative visual providers.
     """
+    if scene is not None:
+        from src.explanatory_motion import validate_scene
+        if validate_scene(scene) == "authored_diagram":
+            # Deferred render uses the measured voice duration in editor_long.
+            path = out_base + ".diagram.json"
+            os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as handle:
+                json.dump(scene, handle, ensure_ascii=False, indent=2)
+            return path, "authored-motion", "original-schematic"
     chain = []
 
     if os.environ.get("VISUAL_STYLE", "").lower() == "whiteboard":
@@ -400,7 +411,7 @@ def get_visual(keyword, out_base, scene_index=0, orientation="portrait", scene_t
     if os.environ.get("PEXELS_API_KEY") and not _has_failed("pexels", keyword):
         chain.append((
             "pexels",
-            lambda kw, p, o=orientation: _pexels(kw, scene_index, p, orientation=o),
+            lambda kw, p, o=orientation: _pexels(kw, scene_index, p, orientation=o, literal_query=scene is not None),
             out_base + ".mp4",
             "video",
         ))
@@ -408,7 +419,7 @@ def get_visual(keyword, out_base, scene_index=0, orientation="portrait", scene_t
     if os.environ.get("PIXABAY_API_KEY") and not _has_failed("pixabay", keyword):
         chain.append((
             "pixabay",
-            lambda kw, p: _pixabay(kw, scene_index, p),
+            lambda kw, p: _pixabay(kw, scene_index, p, literal_query=scene is not None),
             out_base + ".mp4",
             "video",
         ))
