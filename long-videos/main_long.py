@@ -773,6 +773,9 @@ def _storyboard_first_plan(topic, topic_ctx=None):
               + rules + "\nCONTEXT: " + json.dumps(evidence) +
               "\nSTORYBOARD: " + json.dumps(board, ensure_ascii=False))
     raw, model2 = call(prompt, 14000)
+    # Retain exact pass2 evidence before structure and word-budget checks.
+    with open("output_long/storyboard_script_raw.json", "w", encoding="utf-8") as handle:
+        json.dump(raw, handle, indent=2, ensure_ascii=False)
     plan = _validate_long(raw, topic)
     if len(plan["chapters"]) != 5 or any(len(c["scenes"]) != 4 for c in plan["chapters"]):
         raise ValueError("Script departed from developed storyboard structure")
@@ -787,7 +790,7 @@ def _storyboard_first_plan(topic, topic_ctx=None):
                     raise ValueError("Script omitted concrete visual specification")
             count = len(scene["narration"].split())
             if not 45 <= count <= 90:
-                raise ValueError("Script scene narration is too thin or too long")
+                raise ValueError(f"Script scene {ci+1}.{si+1} narration has {count} words; requires 45-90")
             words += count
     if not 1000 <= words <= 1400:
         raise ValueError("Script duration budget departed from storyboard")

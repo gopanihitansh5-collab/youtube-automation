@@ -6,6 +6,7 @@ passes them through pipeline stages, and persists to disk.
 import os
 import json
 import datetime
+from pathlib import Path
 from dataclasses import dataclass, field, asdict
 
 
@@ -88,6 +89,33 @@ class TopicContext:
         return "\n".join(lines)
 
 
+def apply_verified_topic_evidence(ctx, evidence_dir=None, today=None):
+    """Attach an exact-topic, dated, source-linked editorial bundle when needed.
+
+    Bundles are reviewed source material, not model-generated retrieval. Do not
+    apply another topic's facts, overwrite live facts, or reuse expired research.
+    """
+    if ctx.key_facts or ctx.sources:
+        return ctx
+    directory = Path(evidence_dir) if evidence_dir is not None else Path(__file__).with_name("topic-evidence")
+    today = today or datetime.date.today()
+    for path in sorted(directory.glob("*.json")):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if data.get("topic", "").strip().casefold() != ctx.topic.strip().casefold():
+            continue
+        age = (today - datetime.date.fromisoformat(data["verified_on"])).days
+        if not 0 <= age <= min(int(data.get("review_after_days", 0)), 180):
+            raise ValueError("Topic evidence needs source re-verification before authoring")
+        if not data.get("key_facts") or not data.get("sources"):
+            raise ValueError("Topic evidence is incomplete")
+        ctx.key_facts = list(data["key_facts"])
+        ctx.sources = list(data["sources"])
+        ctx.video_angle = data.get("video_angle", "")
+        ctx.search_date = data["verified_on"]
+        return ctx
+    return ctx
+
+
 # ─── Parser ──────────────────────────────────────────────────────────
 
 def parse_topic_context(item: dict, source_label: str = "") -> TopicContext:
@@ -98,7 +126,7 @@ def parse_topic_context(item: dict, source_label: str = "") -> TopicContext:
     """
     if item.get("_topic_context") or item.get("topic_context"):
         return TopicContext.from_llm_response(item, source_label or item.get("source", "llm-pick"))
-    return TopicContext.from_item(item)
+    return apply_verified_topic_evidence(TopicContext.from_item(item))
 
 
 # ─── Passer ──────────────────────────────────────────────────────────
