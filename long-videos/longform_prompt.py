@@ -346,7 +346,7 @@ def build_long_prompt(topic, trending_context=None):
     entropy = int.from_bytes(os.urandom(4), "big") + time.time_ns()
     rng = random.Random(_seed(topic) + entropy)
 
-    drifted = _drift_topic(topic, rng)
+    drifted = topic.strip()  # Do not turn an evidence-bounded topic into an unsupported angle.
 
     for _ in range(20):
         arc_candidate = rng.choice(LONG_FORM_ARCS)
@@ -370,7 +370,7 @@ def build_long_prompt(topic, trending_context=None):
     tone = rng.choice(TONES)
     hook_style = rng.choice(HOOK_STYLES)
     cta = rng.choice(CTA_STYLES)
-    hook_text = _generate_hook(hook_style, topic, rng)
+    hook_text = "Write a concrete question or contrast answered by the supplied evidence. No invented personal experience."
     rhetorical = rng.sample(RHETORICAL_DEVICES, k=rng.randint(2, 4))
 
     scenes_per_chapter = rng.randint(5, 10)
@@ -457,14 +457,14 @@ RETENTION ARCHITECTURE (MANDATORY):
 4. VALUE DENSITY: Every scene must deliver either: a surprising fact, a counter-intuitive insight, a practical takeaway, or an emotional beat.
 5. CLIMAX: Place the biggest reveal or strongest argument at ~80% of the video, not at the end.
 6. CONCLUSION: Summarize the transformation. Give a clear single next step. End with a question to drive comments.
-7. CHAPTER TRANSITIONS: Use verbal cues like "Now that we understand X, let's look at Y" for natural chapter boundaries.
+7. CHAPTER TRANSITIONS: Connect the specific unresolved question to the next explanation. No repeated transition formula.
 
 HUMAN AUTHENTICITY RULES (MANDATORY — VIOLATION BREAKS THE ILLUSION):
 1. Vary sentence starters aggressively. Never begin two consecutive sentences with the same word. Never begin more than 3 sentences in a chapter with the same part of speech.
 2. Use contractions naturally (don't, can't, won't, isn't, it's, there's, that's, they've).
 3. Occasionally start a sentence with "And", "But", "So", "Or", "Because" — real humans speak this way.
 4. Include a relatable qualitative or explicitly hypothetical example per chapter. A number, date, named factual case, study citation or quotation is optional only when supplied in topic context.
-5. Use analogies and metaphors to explain abstract concepts. At least one per chapter.
+5. Use an analogy only when it clarifies a specific mechanism. Do not force one into every scene or chapter.
 6. Vary paragraph length. A single short punchy sentence followed by a longer 3-sentence explanation creates natural rhythm.
 7. No formulaic transitions. Instead of "Now let's look at X", try "X tells a completely different story" or "This is where X gets fascinating".
 8. Read every scene aloud. If it sounds like it was written by AI, rewrite it until it sounds like a human expert speaking naturally.
@@ -487,7 +487,7 @@ OUTPUT FORMAT:
 Return ONLY valid JSON with EXACTLY these keys:
 {{
   "title": "SEO-optimised title <= 80 chars, primary keyword near the start, no clickbait without delivery",
-  "description": "3-5 punchy lines with emojis, then chapter timestamps (0:00 - Hook\\n2:15 - Chapter 1\\n...), then 8-10 relevant #hashtags",
+  "description": "3-5 factual lines and relevant hashtags. Do not guess timestamps; timing is derived after rendering.",
   "tags": ["12", "lowercase", "seo", "tags"],
   "hook": "8-15 word hook that stops the scroll — a genuine curiosity gap or bold claim",
   "comment": "specific opinion question that drives thoughtful discussion replies, not generic",
@@ -499,7 +499,7 @@ Return ONLY valid JSON with EXACTLY these keys:
       "title": "Chapter Title Here",
       "timestamp_sec": 0,
       "scenes": [
-        {{"narration": "3-5 sentences delivering one complete narrative beat in natural spoken language. 40-80 words. Use a relatable qualitative detail; specific factual numbers or names only when supplied in topic context.", "keyword": "CINEMATIC VISUAL BRIEF 15-25 words for landscape 16:9 stock footage — unique perspective, lighting, and subject"}}
+        {{"narration": "3-5 sentences delivering one complete narrative beat in natural spoken language. 40-80 words. Use a relatable qualitative detail; specific factual numbers or names only when supplied in topic context.", "keyword": "3-6 literal stock search words naming a common subject and action"}}
       ]
     }}
   ]
@@ -521,13 +521,8 @@ NARRATION MASTERY:
 - No emojis, hashtags, URLs, or speaker labels in narration. Pure spoken word.
 - Read every scene aloud. If it does not flow naturally when spoken aloud by a human, rewrite it completely.
 
-CINEMATIC KEYWORD ARCHITECTURE:
-Each "keyword" is a visual brief for stock footage search (landscape 16:9). Rules:
-- 15-25 words describing ONE continuous frame with a specific subject.
-- Include: primary subject, camera perspective (wide, medium, close-up, aerial, POV, tracking, dolly, crane, macro, Dutch angle), lighting quality (golden hour, dramatic shadows, soft diffused, neon, rim light, volumetric), color atmosphere.
-- Match scene's energy level for mood.
-- Every keyword must have a COMPLETELY UNIQUE subject + perspective + lighting combo from all others.
-- NEVER repeat a visual concept across scenes. If one scene uses "close up of hands typing", the next must use something completely different like "wide aerial cityscape at dusk".
+STOCK SEARCH AND PROVENANCE:
+Each keyword is a literal 3-6 word search phrase naming a common observable subject and action. Keep camera, lighting and editing directions in production_brief, separate from the search query. Every scene advances a distinct explanation and uses a relevant illustrative action. Do not invent scans, historic reenactments, futuristic devices or arbitrary city/landscape filler for variety. Stock footage illustrates; it cannot prove a medical mechanism or measured result. Preserve that distinction in visual_source_notes.
 
 Valid JSON only. No markdown fences. No explanatory text outside JSON. Never include "Here is the JSON" or similar.
 
@@ -536,6 +531,8 @@ TOPIC: "{topic}"
     if trending_context:
         tc = trending_context
         ctx_lines = []
+        if tc.get("context_block"):
+            ctx_lines.append(tc["context_block"])
         if tc.get("top_trending_topic"):
             ctx_lines.append(f"TRENDING RIGHT NOW: {tc['top_trending_topic']}")
         if tc.get("reason"):
@@ -548,9 +545,10 @@ TOPIC: "{topic}"
                     ctx_lines.append(f"{cat.upper()}: {' | '.join(hl[:3])}")
         if ctx_lines:
             prompt += "\n\nCURRENT CONTEXT (integrate naturally into the narrative):\n" + "\n".join(ctx_lines)
-            prompt += "\n\nReference these current events where relevant to make the content timely and grounded in real news."
+            prompt += "\n\nUse only the supplied source claims. Preserve uncertainty; do not present evergreen educational material as breaking news."
 
     prompt += "\n\n" + FACTUAL_GENERATION_RULE
+    prompt += "\nNever invent personal discoveries, experiments or experience. Preserve uncertainty; a hypothesis about dreaming is not an established purpose. No health-benefit promises. Avoid Imagine/Picture/Think of openings and energy labels spoken as narration."
     return prompt, meta
 
 

@@ -17,8 +17,8 @@ from longform_prompt import FACTUAL_GENERATION_RULE
 
 
 def _safe_format(template, **kwargs):
-    escaped = {k: str(v).replace("{", "{{").replace("}", "}}") for k, v in kwargs.items()}
-    return template.format(**escaped)
+    # format substitutes values once; braces inside a value are already literal.
+    return template.format(**{k: str(v) for k, v in kwargs.items()})
 
 
 def _require_text(content, provider):
@@ -191,6 +191,7 @@ STRUCTURE: 5-8 chapters, each with 4-6 narrative paragraphs (40-80 words each).
 Return ONLY valid JSON:
 {{
   "title": "SEO-optimised title <= 80 chars, primary keyword near start",
+  "hook": "A concrete question or contrast answered by this script; no invented personal experience",
   "chapters": [
     {{
       "title": "Chapter title",
@@ -202,7 +203,11 @@ Return ONLY valid JSON:
 }}
 
 HUMAN AUTHENTICITY RULES:
-- Vary sentence starters aggressively. Never start 2 consecutive sentences with the same word.
+- Open with the concrete question in the hook, then answer it through a sequence of distinct mechanisms.
+- Do not invent first-person experiments, discoveries or reported outcomes.
+- No formulaic Imagine/Picture/Think of, emotion labels, summary filler or repeated chapter intros.
+- Distinguish established findings from hypotheses and unknowns. Never promise medical benefits.
+- Vary sentence starters. Never start 2 consecutive sentences with the same word.
 - Use contractions naturally (don't, can't, won't, it's, there's).
 - Include one relatable qualitative or explicitly hypothetical example per chapter; factual specifics only from supplied topic context.
 - Never use: "delve into", "let's dive in", "in this video we'll explore", "it's worth noting", "in conclusion", "overall".
@@ -211,13 +216,15 @@ HUMAN AUTHENTICITY RULES:
 """
 
 
-def stage1_write_script(topic, trending_context=None):
+def stage1_write_script(topic, trending_context=None, review_feedback=None):
     """OpenRouter → Groq free: full narrative script."""
     ctx = ""
     if trending_context and trending_context.get("context_block"):
         ctx = "\nCURRENT CONTEXT:\n" + trending_context["context_block"]
     prompt = _safe_format(STAGE1_PROMPT, topic=topic, trending_context=ctx)
     prompt += "\n\n" + FACTUAL_GENERATION_RULE
+    if review_feedback:
+        prompt += "\nREVISE AGAINST THESE INDEPENDENT REVIEW FINDINGS:\n" + json.dumps(review_feedback, ensure_ascii=False)
     print("  [Stage 1/5] Script writer (OpenRouter → Groq)...", flush=True)
     text, model = _call_free_llm(prompt, temperature=0.75, max_tokens=16384)
     data = _extract_json(text) or {}
@@ -225,6 +232,7 @@ def stage1_write_script(topic, trending_context=None):
     print(f"  → {len(chapters)} chapters via {model}", flush=True)
     return {
         "title": data.get("title", topic)[:80],
+        "hook": data.get("hook", ""),
         "chapters": chapters,
         "key_points": data.get("key_points", []),
     }, model
@@ -236,7 +244,9 @@ STAGE2_PROMPT = """You are a YouTube script editor. Break each chapter's paragra
 
 Each paragraph becomes 1-2 scenes. Each scene:
 - narration: 2-4 sentences spoken audio (20-40 seconds)
-- keyword: 15-25 word visual brief for stock footage (landscape 16:9)
+- keyword: 3-6 word literal search phrase for common real-world stock footage
+- visual_source_notes: explain exactly what the stock shot illustrates and what it cannot prove
+- production_brief: camera, framing, lighting and editing directions, separate from the search phrase
 - energy: one of [calm, curious, energetic, intense, hopeful, thoughtful]
 
 TARGET: at least 15 total scenes across all chapters for a 5+ minute video.
@@ -249,24 +259,29 @@ Return ONLY valid JSON:
     {{
       "title": "Chapter title",
       "scenes": [
-        {{"narration": "2-4 spoken sentences", "keyword": "15-25 word visual brief with subject, camera angle, lighting, mood", "energy": "curious"}}
+        {{"narration": "2-4 spoken sentences", "keyword": "3-6 searchable words", "production_brief": "framing and edit directions", "visual_source_notes": "illustrative, not research evidence", "energy": "curious"}}
       ]
     }}
   ]
 }}
 
 Rules:
-- Each keyword must be a UNIQUE visual concept — different subject + angle + lighting from all others.
+- Each scene advances a distinct explanation, not a synonym of the previous scene.
+- Choose common observable actions relevant to the narration, not abstract emotions, historical reenactments or fictional technology.
+- No city skylines, landscapes or generic b-roll unrelated to the claim.
+- Stock footage illustrates; it cannot be evidence of a study, brain mechanism, historical event or measured result.
+- Preserve every source attribution and uncertainty qualifier in the supplied script.
 - Narration must flow naturally when spoken aloud.
 - Pure JSON. No markdown.
 """
 
 
-def stage2_breakdown_scenes(chapters_data):
+def stage2_breakdown_scenes(chapters_data, topic_context=None):
     """OpenRouter → Groq free: chapters → scenes."""
     ch_json = json.dumps(chapters_data, indent=2)
     prompt = _safe_format(STAGE2_PROMPT, chapters_json=ch_json)
     prompt += "\n\n" + FACTUAL_GENERATION_RULE
+    prompt += "\nSUPPLIED SOURCE CONTEXT:\n" + json.dumps(topic_context or {}, ensure_ascii=False)
     print(f"  [Stage 2/5] Scene breakdown (OpenRouter → Groq)...", flush=True)
     text, model = _call_free_llm(prompt, temperature=0.6, max_tokens=16384)
     data = _extract_json(text) or {}
@@ -278,27 +293,16 @@ def stage2_breakdown_scenes(chapters_data):
 
 # ─── Stage 3: Scene Enhancer ─────────────────────────────────────────
 
-STAGE3_PROMPT = """You are a cinematic visual director. Enhance each scene's keyword with professional camera directions.
-
-For each scene, rewrite the keyword to include:
-- Camera angle: wide, close-up, aerial, POV, tracking, dolly, macro, Dutch angle, over-the-shoulder
-- Lighting: golden hour, dramatic shadows, soft diffused, neon, rim light, volumetric, candlelight
-- Color palette: warm amber, cool teal, vibrant, monochrome, pastel, metallic
-- Every keyword must be COMPLETELY UNIQUE from all others
-- Keep 20-30 words
-
+STAGE3_PROMPT = """You are a practical stock-footage editor. Improve relevance and findability without changing narration.
+For every scene return one JSON object in the same order. Use keyword_enhanced as a literal 3-6 word search phrase naming a common subject and action. Keep camera/lighting/color instructions in production_brief, not the search query. Use varied relevant subjects, never arbitrary scenery to fake uniqueness. Do not invent medical scans, historic events, exotic settings or measured demonstrations. Stock is illustrative, not evidence. visual_source_notes must explain that distinction.
 SCENES: {scenes_json}
-
-Return ONLY valid JSON array (same length):
-[
-  {{"narration": "original", "keyword": "original", "energy": "original", "keyword_enhanced": "CINEMATIC: wide aerial drone shot of a futuristic city at golden hour with warm amber volumetric light and lens flare"}}
-]
-
-Pure JSON array. No markdown.
+Return ONLY a JSON array of the same length:
+[{{"keyword_enhanced": "person writing sleep diary", "production_brief": "wide framing, soft natural light; cut on the action", "visual_source_notes": "Illustrative everyday action; not a study participant or measured outcome"}}]
+No markdown.
 """
 
 
-def stage3_enhance_scenes(chapters):
+def stage3_enhance_scenes(chapters, topic_context=None):
     """OpenRouter → Groq free: enhance visual keywords."""
     all_scenes = []
     scene_map = []
@@ -313,6 +317,7 @@ def stage3_enhance_scenes(chapters):
     sc_json = json.dumps(all_scenes, indent=2)
     prompt = _safe_format(STAGE3_PROMPT, scenes_json=sc_json)
     prompt += "\n\n" + FACTUAL_GENERATION_RULE
+    prompt += "\nSUPPLIED SOURCE CONTEXT:\n" + json.dumps(topic_context or {}, ensure_ascii=False)
     print(f"  [Stage 3/5] Scene enhancer (OpenRouter → Groq)...", flush=True)
 
     text, model = _call_free_llm(prompt, temperature=0.5, max_tokens=16384)
@@ -323,6 +328,9 @@ def stage3_enhance_scenes(chapters):
         for (ci, si), sc in zip(scene_map, enhanced):
             if isinstance(sc, dict) and sc.get("keyword_enhanced"):
                 chapters[ci]["scenes"][si]["keyword"] = sc["keyword_enhanced"]
+                for key in ("production_brief", "visual_source_notes"):
+                    if isinstance(sc.get(key), str):
+                        chapters[ci]["scenes"][si][key] = sc[key]
                 applied += 1
         print(f"  → enhanced {applied}/{len(enhanced)} keywords via {model}", flush=True)
     else:
@@ -359,13 +367,14 @@ Pure JSON. No markdown.
 """
 
 
-def stage4_hook_retention(title, chapters, key_points):
+def stage4_hook_retention(title, chapters, key_points, topic_context=None):
     """OpenRouter → Groq free: hooks, CTA, retention."""
     ch_summary = "; ".join(f"{c.get('title','?')} ({len(c.get('scenes',[]))}s)" for c in chapters)
     kp_str = "; ".join(key_points[:6]) if key_points else ""
 
     prompt = _safe_format(STAGE4_PROMPT, title=title, chapters_summary=ch_summary, key_points=kp_str)
     prompt += "\n\n" + FACTUAL_GENERATION_RULE
+    prompt += "\nSUPPLIED SOURCE CONTEXT:\n" + json.dumps(topic_context or {}, ensure_ascii=False)
     print("  [Stage 4/5] Hook & retention (OpenRouter → Groq)...", flush=True)
     text, model = _call_free_llm(prompt, temperature=0.7, max_tokens=4096)
     data = _extract_json(text) or {}
@@ -402,7 +411,7 @@ Return ONLY valid JSON with EXACTLY this structure:
       "title": "Chapter title",
       "timestamp_sec": 0,
       "scenes": [
-        {{"narration": "3-5 spoken sentences", "keyword": "15-25 word cinematic visual brief", "energy": "curious"}}
+        {{"narration": "3-5 spoken sentences", "keyword": "3-6 word literal stock search phrase", "production_brief": "framing and edit directions", "visual_source_notes": "illustration limits", "energy": "curious"}}
       ]
     }}
   ]
@@ -410,17 +419,20 @@ Return ONLY valid JSON with EXACTLY this structure:
 
 Rules:
 - Use search grounding to check existing claims. Do not add numbers, dates, quotations or named factual examples absent from supplied topic context.
-- Ensure every scene keyword is unique in subject + angle + lighting.
+- Use relevant, common, searchable stock subjects/actions, never fabricated scans or events. Keep production directions separate.
+- No invented first-person claims, unsupported health benefits, numerical effects or false certainty.
+- Do not add fabricated timestamps; timing is derived after narration is finalized.
 - Maintain human authenticity: varied sentence starters, contractions, natural rhythm.
 - No AI tells. No "delve into", "let's dive in", "in conclusion".
 - Pure JSON. No markdown.
 """
 
 
-def stage5_final_review(plan_dict):
+def stage5_final_review(plan_dict, topic_context=None):
     """Gemini search-grounded: fact-check, restructure, polish."""
     plan_json = json.dumps(plan_dict, indent=2, default=str)
-    prompt = _safe_format(STAGE5_PROMPT, plan_json=plan_json[:8000])  # truncate if huge
+    prompt = _safe_format(STAGE5_PROMPT, plan_json=plan_json)
+    prompt += "\nSUPPLIED FACTUAL CONTEXT AND SOURCES:\n" + json.dumps(topic_context or {}, ensure_ascii=False)
     prompt += "\n\n" + FACTUAL_GENERATION_RULE
     print("  [Stage 5/5] Final review & polish (Gemini search-grounded)...", flush=True)
     try:
@@ -476,6 +488,46 @@ def _fix_from_review(plan, review_results):
     return plan
 
 
+def _save_authoring_diagnostic(stage, candidate, review=None):
+    """Keep generated evidence before fallbacks or validators can discard it."""
+    path = os.path.join("output_long", "authoring_diagnostics.json")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    records = []
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as handle:
+            records = json.load(handle)
+    records.append({"stage": stage, "candidate": candidate, "review": review})
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(records, handle, indent=2, ensure_ascii=False)
+
+
+def _rewrite_from_review(plan, review, topic_context=None):
+    """One bounded authoring repair, never an approval or threshold change."""
+    prompt = ("Rewrite this educational video plan against the independent review below. "
+              "Return the same JSON keys and chapter/scene order. Keep at least 15 scenes. "
+              "Each narration is 50-75 natural spoken words advancing a distinct mechanism. "
+              "Use only supplied factual context, preserving uncertainty and source attribution. "
+              "Remove unsupported quantified benefits, historical stories and personal claims. "
+              "Replace vague hooks with a concrete question the script actually answers. "
+              "No repeated Imagine/Picture/Think of openings or spoken energy labels. "
+              "Every stock keyword is a 3-6 word literal phrase naming common observable "
+              "subjects and actions relevant to the narration. Camera/lighting directions "
+              "go in production_brief. No generic scenery or fabricated evidence. "
+              "Return pure JSON, not an explanation.\n" + FACTUAL_GENERATION_RULE +
+              "\nSUPPLIED CONTEXT: " + json.dumps(topic_context or {}, ensure_ascii=False) +
+              "\nINDEPENDENT REVIEW: " + json.dumps(review, ensure_ascii=False) +
+              "\nPLAN: " + json.dumps(plan, ensure_ascii=False))
+    text, model = _call_free_llm(prompt, temperature=0.35, max_tokens=16384)
+    revised = _extract_json(text)
+    if not isinstance(revised, dict) or not revised.get("chapters"):
+        raise ValueError("Review-directed rewrite returned malformed plan")
+    original_count = sum(len(ch.get("scenes", [])) for ch in plan["chapters"])
+    revised_count = sum(len(ch.get("scenes", [])) for ch in revised["chapters"])
+    if revised_count != original_count:
+        raise ValueError("Review-directed rewrite changed the scene structure")
+    return revised, model
+
+
 # ─── Full Pipeline ───────────────────────────────────────────────────
 
 def run_full_pipeline(topic, trending_context=None):
@@ -508,14 +560,17 @@ def run_full_pipeline(topic, trending_context=None):
     rev1 = _run_reviewers(title, hook_placeholder, ch_data, "Stage 1", trending_context)
     if not rev1[0]:
         print("  Stage 1 review failed — retrying with different prompt", flush=True)
-        script, m1b = stage1_write_script(topic, trending_context)
+        script, m1b = stage1_write_script(topic, trending_context, rev1[1])
         models_used.append(m1b + "(retry)")
         ch_data = script.get("chapters", ch_data)
+        title = script.get("title", title)
+        key_points = script.get("key_points", [])
+        hook_placeholder = script.get("hook", "")
 
     # ── Stage 2: Scene breakdown ──
     chapters, m2 = load_stage("stage2", topic)
     if not chapters:
-        chapters, m2 = stage2_breakdown_scenes(ch_data)
+        chapters, m2 = stage2_breakdown_scenes(ch_data, trending_context)
         if sum(len(c.get("scenes", [])) for c in chapters) >= 15:
             save_stage("stage2", topic, chapters, m2)
     models_used.append(m2)
@@ -532,7 +587,7 @@ def run_full_pipeline(topic, trending_context=None):
     if enhanced:
         chapters = enhanced
     else:
-        chapters, m3 = stage3_enhance_scenes(chapters)
+        chapters, m3 = stage3_enhance_scenes(chapters, trending_context)
         save_stage("stage3", topic, chapters, m3)
     models_used.append(m3)
 
@@ -543,23 +598,15 @@ def run_full_pipeline(topic, trending_context=None):
         if not vis_check.get("passed", True):
             print(f"  Visual feasibility flagged: {len(vis_check.get('hard_to_find',[]))} hard scenes",
                   flush=True)
-            hard_indices = set(vis_check.get("hard_to_find", [])[:3])
-            flat_idx = 0
-            for ci, c in enumerate(chapters):
-                for si in range(len(c.get("scenes", []))):
-                    if flat_idx in hard_indices:
-                        chapters[ci]["scenes"][si]["keyword"] = (
-                            "Stock footage b-roll cinematic establishing shot "
-                            "wide angle natural lighting professional production"
-                        )
-                    flat_idx += 1
+            # A generic unrelated replacement is not a visual repair. Preserve the
+            # actual briefs so later review can reject them or drive a real rewrite.
     except Exception as e:
         print(f"  Visual review error: {e}", flush=True)
 
     # ── Stage 4: Hook & retention ──
     retention, m4 = load_stage("stage4", topic)
     if not retention:
-        retention, m4 = stage4_hook_retention(title, chapters, key_points)
+        retention, m4 = stage4_hook_retention(title, chapters, key_points, trending_context)
         save_stage("stage4", topic, retention, m4)
     models_used.append(m4)
     hook = retention.get("hook", "")[:120] or "Watch till the end"
@@ -591,11 +638,21 @@ def run_full_pipeline(topic, trending_context=None):
     # Run all reviewers on final plan
     final_review = _run_reviewers(title, hook, chapters, "pre-gemini", trending_context)
     raw_plan = _fix_from_review(raw_plan, final_review[1] if len(final_review) > 1 else {})
+    _save_authoring_diagnostic("pre-gemini", raw_plan, final_review[1])
+    if not final_review[0]:
+        revised, repair_model = _rewrite_from_review(raw_plan, final_review[1], trending_context)
+        models_used.append(repair_model + "(review-rewrite)")
+        raw_plan = revised
+        final_review = _run_reviewers(raw_plan.get("title", title), raw_plan.get("hook", hook),
+                                      raw_plan.get("chapters", []), "review-rewrite", trending_context)
+        _save_authoring_diagnostic("review-rewrite", raw_plan, final_review[1])
+        if not final_review[0]:
+            raise RuntimeError("Review-directed authoring repair still failed independent reviewers")
 
     # ── Stage 5: Gemini final review ──
     polished, m5 = load_stage("stage5", topic)
     if not polished or not m5 or "review-skipped" in m5:
-        polished, m5 = stage5_final_review(raw_plan)
+        polished, m5 = stage5_final_review(raw_plan, trending_context)
         save_stage("stage5", topic, polished, m5)
     models_used.append(m5)
 

@@ -1,0 +1,22 @@
+{
+  "topic": "The Science of Sleep: Why We Dream",
+  "verified_on": "2026-10-16",
+  "review_after_days": 180,
+  "video_angle": "What sleep measurements can show, what dreaming feels like, and why the exact purpose of dreaming is still unknown. Separate observation, hypothesis and unknowns; no medical advice or benefit promises.",
+  "key_facts": [
+    "[NINDS] Dreams can occur in all sleep stages, but are usually most vivid in REM. The exact purpose of dreaming is not known; processing emotions is a possibility, not an established universal function.",
+    "[NHLBI stages] Sleep alternates between REM and non-REM. Non-REM has three stages identified from measured brain activity. Stage 1 is transition into sleep, stage 2 is sleep, and stage 3 is deep or slow-wave sleep, more common early in the night.",
+    "[NHLBI stages] During REM the eyes twitch and measured brain activity resembles waking activity. Muscles normally become limp. There is usually more REM later in the night. These measurements do not reveal the meaning of a person's dream.",
+    "[NINDS] During REM, the thalamus is active and sends images, sounds and other sensations to the cortex. The amygdala, involved in emotion processing, also becomes more active. Do not infer that a particular dream proves a clinical diagnosis.",
+    "[NINDS] Memory consolidation most likely requires both non-REM and REM sleep. Do not claim dreams alone cause learning or that a dream technique improves memory by a measured amount.",
+    "[NHLBI importance] Sleep supports learning and long-term memory formation; inadequate or poor-quality sleep can affect focus and clear thinking. This does not establish that more vivid dreams produce better health.",
+    "[NINDS] Circadian rhythms and sleep-wake homeostasis both regulate sleep and wakefulness. Light exposure helps set the circadian cycle; sleep drive grows during time awake. Do not claim a specific change in REM duration or dream vividness from a routine.",
+    "[NINDS] A sleep study can record breathing, oxygen, eye and limb movements, heart rate and brain waves to help a specialist assess sleep stages. A stock shot of sensors is illustration, never the actual record or proof of a study result.",
+    "[NINDS] Dream recollection can be incomplete. Events from the day can enter dreams, and stress or anxiety is associated with more frightening dreams. Do not claim fixed symbolic meanings, hidden messages or guaranteed problem solving."
+  ],
+  "sources": [
+    "NINDS, Brain Basics: Understanding Sleep, last reviewed February 25 2025, fetched October 16 2026: https://www.ninds.nih.gov/health-information/public-education/brain-basics/brain-basics-understanding-sleep",
+    "NHLBI, Sleep Phases and Stages, updated March 24 2022, fetched October 16 2026: https://www.nhlbi.nih.gov/health/sleep/stages-of-sleep",
+    "NHLBI, Why Is Sleep Important?, updated March 24 2022, fetched October 16 2026: https://www.nhlbi.nih.gov/health/sleep/why-sleep-important"
+  ]
+}
