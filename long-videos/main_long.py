@@ -542,6 +542,8 @@ def _validate_long(data, topic):
 
 
 def _extract_json(text):
+    if not isinstance(text, str):
+        raise ValueError("provider returned empty content")
     text = re.sub(r"^```(?:json)?|```$", "", text.strip(), flags=re.MULTILINE).strip()
     start = text.find("{")
     end = text.rfind("}")

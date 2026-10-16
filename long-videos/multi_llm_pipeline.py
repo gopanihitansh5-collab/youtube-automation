@@ -21,7 +21,20 @@ def _safe_format(template, **kwargs):
     return template.format(**escaped)
 
 
+def _require_text(content, provider):
+    """Provider returned a 200 with null/empty content (free endpoints do this).
+
+    Raise so the caller's model chain moves to the next model instead of
+    handing None downstream, where .strip() would abort the whole pipeline.
+    """
+    if not isinstance(content, str) or not content.strip():
+        raise ValueError(f"{provider} returned empty content")
+    return content
+
+
 def _extract_json(text):
+    if not isinstance(text, str):
+        return None
     text = re.sub(r"^```(?:json)?|```$", "", text.strip(), flags=re.MULTILINE).strip()
     start = text.find("{")
     end = text.rfind("}")
@@ -36,6 +49,8 @@ def _extract_json(text):
 
 
 def _extract_json_array(text):
+    if not isinstance(text, str):
+        return None
     text = re.sub(r"^```(?:json)?|```$", "", text.strip(), flags=re.MULTILINE).strip()
     start = text.find("[")
     end = text.rfind("]")
@@ -81,7 +96,7 @@ def _call_groq(prompt, temperature=0.7, max_tokens=12288, timeout=300):
             )
             r.raise_for_status()
             body = r.json()
-            return body["choices"][0]["message"]["content"], f"groq-{model}"
+            return _require_text(body["choices"][0]["message"]["content"], f"groq-{model}"), f"groq-{model}"
         except Exception as e:
             last_err = e
             print(f"      {model} failed: {e}", flush=True)
@@ -111,7 +126,7 @@ def _call_openrouter(prompt, temperature=0.7, max_tokens=12288, timeout=300):
             body = r.json()
             if "error" in body:
                 raise RuntimeError(body["error"].get("message", "unknown"))
-            return body["choices"][0]["message"]["content"], f"openrouter-{model}"
+            return _require_text(body["choices"][0]["message"]["content"], f"openrouter-{model}"), f"openrouter-{model}"
         except Exception as e:
             last_err = e
             print(f"      {model} failed: {e}", flush=True)
@@ -153,7 +168,7 @@ def _call_gemini_review(prompt, temperature=0.3, max_tokens=16384, timeout=300):
             )
             r.raise_for_status()
             body = r.json()
-            text = body["candidates"][0]["content"]["parts"][0]["text"]
+            text = _require_text(body["candidates"][0]["content"]["parts"][0]["text"], f"gemini-{model}")
             grounding = body.get("candidates", [{}])[0].get("groundingMetadata", {})
             sources = grounding.get("groundingChunks", [])
             print(f"      search-grounded: {len(sources)} sources", flush=True)

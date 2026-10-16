@@ -73,6 +73,8 @@ def _call_reviewer(prompt, temperature=0.2, max_tokens=4096, timeout=120):
                 )
                 r.raise_for_status()
                 text = r.json()["choices"][0]["message"]["content"]
+                if not isinstance(text, str) or not text.strip():
+                    raise ValueError("empty reviewer content")
                 return text, f"groq-{model}"
             except Exception as e:
                 last_err = e
@@ -96,7 +98,9 @@ def _call_reviewer(prompt, temperature=0.2, max_tokens=4096, timeout=120):
                 r.raise_for_status()
                 body = r.json()
                 if "error" not in body:
-                    return body["choices"][0]["message"]["content"], f"openrouter-{model}"
+                    text = body["choices"][0]["message"]["content"]
+                    if isinstance(text, str) and text.strip():
+                        return text, f"openrouter-{model}"
             except Exception:
                 pass
     raise RuntimeError(f"no reviewer available: {last_err}")
