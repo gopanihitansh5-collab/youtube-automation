@@ -211,6 +211,13 @@ def _scene_visual_kind(visual):
 
 
 def _normalize(visual, dur, out, index):
+    # An authored schematic cannot silently degrade to unrelated stock/gradient.
+    if visual and len(visual) > 1 and visual[1] == "authored-motion":
+        from src.explanatory_motion import validate_scene, render
+        with open(visual[0], encoding="utf-8") as handle:
+            scene = json.load(handle)
+        validate_scene(scene)
+        return render(scene["diagram_spec"], dur, out)
     kind = _scene_visual_kind(visual)
     if kind == "video" and visual[0] and os.path.exists(visual[0]):
         return _norm_video(visual[0], dur, out)

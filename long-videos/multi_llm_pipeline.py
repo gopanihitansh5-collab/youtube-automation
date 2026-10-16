@@ -14,6 +14,7 @@ import requests
 
 from script_cache import estimate_tokens, suggest_model, fits_in_context
 from longform_prompt import FACTUAL_GENERATION_RULE
+from src.explanatory_motion import VISUAL_RULES, validate_scene
 
 
 def _safe_format(template, **kwargs):
@@ -244,6 +245,8 @@ STAGE2_PROMPT = """You are a YouTube script editor. Break each chapter's paragra
 
 Each paragraph becomes 1-2 scenes. Each scene:
 - narration: 2-4 sentences spoken audio (20-40 seconds)
+- visual_type: stock or authored_diagram, according to the execution contract below
+- diagram_spec and diagram_description: required for authored_diagram, absent for stock
 - keyword: 3-6 word literal search phrase for common real-world stock footage
 - visual_source_notes: explain exactly what the stock shot illustrates and what it cannot prove
 - production_brief: camera, framing, lighting and editing directions, separate from the search phrase
@@ -277,18 +280,30 @@ Rules:
 
 
 def stage2_breakdown_scenes(chapters_data, topic_context=None):
-    """OpenRouter → Groq free: chapters → scenes."""
-    ch_json = json.dumps(chapters_data, indent=2)
-    prompt = _safe_format(STAGE2_PROMPT, chapters_json=ch_json)
-    prompt += "\n\n" + FACTUAL_GENERATION_RULE
-    prompt += "\nSUPPLIED SOURCE CONTEXT:\n" + json.dumps(topic_context or {}, ensure_ascii=False)
-    print(f"  [Stage 2/5] Scene breakdown (OpenRouter → Groq)...", flush=True)
-    text, model = _call_free_llm(prompt, temperature=0.6, max_tokens=16384)
-    data = _extract_json(text) or {}
-    chapters = data.get("chapters", [])
-    total = sum(len(c.get("scenes", [])) for c in chapters)
-    print(f"  → {len(chapters)} ch, {total} scenes via {model}", flush=True)
-    return chapters, model
+    """Bound output to one chapter; concrete visual specs make whole-plan JSON large."""
+    chapters, models = [], []
+    outline = [{"chapter": i, "title": c.get("title", "")} for i, c in enumerate(chapters_data)]
+    for ci, source in enumerate(chapters_data):
+        prompt = _safe_format(STAGE2_PROMPT, chapters_json=json.dumps([source], ensure_ascii=False))
+        prompt += "\nReturn exactly ONE chapter with 4-6 scenes, 50-75 words per narration."
+        prompt += "\n\n" + FACTUAL_GENERATION_RULE + "\n" + VISUAL_RULES
+        prompt += "\nFULL OUTLINE (avoid repeating other chapters): " + json.dumps(outline)
+        prompt += "\nSUPPLIED SOURCE CONTEXT:\n" + json.dumps(topic_context or {}, ensure_ascii=False)
+        print(f"  [Stage 2/5] Scene breakdown chapter {ci+1} (free providers)...", flush=True)
+        text, model = _call_free_llm(prompt, temperature=0.5, max_tokens=6500)
+        data = _extract_json(text) or {}
+        units = data.get("chapters", [])
+        _save_authoring_diagnostic(f"scene-breakdown-{ci}", data)
+        if len(units) != 1 or not 4 <= len(units[0].get("scenes", [])) <= 6:
+            raise ValueError(f"Scene breakdown chapter {ci} malformed or incomplete")
+        for si, scene in enumerate(units[0]["scenes"]):
+            if not isinstance(scene, dict) or not scene.get("narration") or not scene.get("keyword"):
+                raise ValueError(f"Scene breakdown chapter {ci} incomplete scene")
+            validate_scene(scene)
+            # Stable identity is code-owned, not an optional model-supplied hint.
+            scene["scene_id"] = f"ch{ci}-sc{si}"
+        chapters.append(units[0]); models.append(model)
+    return chapters, "+".join(dict.fromkeys(models))
 
 
 # ─── Stage 3: Scene Enhancer ─────────────────────────────────────────
@@ -316,7 +331,7 @@ def stage3_enhance_scenes(chapters, topic_context=None):
 
     sc_json = json.dumps(all_scenes, indent=2)
     prompt = _safe_format(STAGE3_PROMPT, scenes_json=sc_json)
-    prompt += "\n\n" + FACTUAL_GENERATION_RULE
+    prompt += "\n\n" + FACTUAL_GENERATION_RULE + "\n" + VISUAL_RULES
     prompt += "\nSUPPLIED SOURCE CONTEXT:\n" + json.dumps(topic_context or {}, ensure_ascii=False)
     print(f"  [Stage 3/5] Scene enhancer (OpenRouter → Groq)...", flush=True)
 
@@ -326,6 +341,8 @@ def stage3_enhance_scenes(chapters, topic_context=None):
     if isinstance(enhanced, list) and len(enhanced) == len(all_scenes):
         applied = 0
         for (ci, si), sc in zip(scene_map, enhanced):
+            if chapters[ci]["scenes"][si].get("visual_type") == "authored_diagram":
+                continue
             if isinstance(sc, dict) and sc.get("keyword_enhanced"):
                 chapters[ci]["scenes"][si]["keyword"] = sc["keyword_enhanced"]
                 for key in ("production_brief", "visual_source_notes"):
@@ -430,8 +447,10 @@ Rules:
 
 def stage5_final_review(plan_dict, topic_context=None):
     """Gemini search-grounded: fact-check, restructure, polish."""
+    from src.explanatory_motion import VISUAL_RULES, validate_scene
     plan_json = json.dumps(plan_dict, indent=2, default=str)
     prompt = _safe_format(STAGE5_PROMPT, plan_json=plan_json)
+    prompt += "\nPreserve scene count, order, visual_type, diagram_spec and provenance. " + VISUAL_RULES
     prompt += "\nSUPPLIED FACTUAL CONTEXT AND SOURCES:\n" + json.dumps(topic_context or {}, ensure_ascii=False)
     prompt += "\n\n" + FACTUAL_GENERATION_RULE
     print("  [Stage 5/5] Final review & polish (Gemini search-grounded)...", flush=True)
@@ -439,6 +458,19 @@ def stage5_final_review(plan_dict, topic_context=None):
         text, model = _call_gemini_review(prompt, temperature=0.25, max_tokens=16384)
         data = _extract_json(text)
         if data and data.get("chapters"):
+            old_chapters, new_chapters = plan_dict.get("chapters", []), data["chapters"]
+            if len(old_chapters) != len(new_chapters):
+                raise ValueError("Gemini changed chapter structure")
+            for old_ch, new_ch in zip(old_chapters, new_chapters):
+                if len(old_ch.get("scenes", [])) != len(new_ch.get("scenes", [])):
+                    raise ValueError("Gemini changed scene structure")
+                for old, new in zip(old_ch.get("scenes", []), new_ch.get("scenes", [])):
+                    if old.get("visual_type", "stock") != new.get("visual_type", "stock"):
+                        raise ValueError("Gemini changed visual execution type")
+                    if old.get("visual_type") == "authored_diagram" and any(
+                            new.get(k) != old.get(k) for k in ("diagram_spec", "diagram_description", "visual_source_notes")):
+                        raise ValueError("Gemini changed reviewed diagram contract")
+                    validate_scene(new)
             total = sum(len(c.get("scenes", [])) for c in data["chapters"])
             print(f"  → reviewed: {len(data['chapters'])} ch, {total} scenes via {model}", flush=True)
             return data, model
@@ -502,30 +534,53 @@ def _save_authoring_diagnostic(stage, candidate, review=None):
 
 
 def _rewrite_from_review(plan, review, topic_context=None):
-    """One bounded authoring repair, never an approval or threshold change."""
-    prompt = ("Rewrite this educational video plan against the independent review below. "
-              "Return the same JSON keys and chapter/scene order. Keep at least 15 scenes. "
-              "Each narration is 50-75 natural spoken words advancing a distinct mechanism. "
-              "Use only supplied factual context, preserving uncertainty and source attribution. "
-              "Remove unsupported quantified benefits, historical stories and personal claims. "
-              "Replace vague hooks with a concrete question the script actually answers. "
-              "No repeated Imagine/Picture/Think of openings or spoken energy labels. "
-              "Every stock keyword is a 3-6 word literal phrase naming common observable "
-              "subjects and actions relevant to the narration. Camera/lighting directions "
-              "go in production_brief. No generic scenery or fabricated evidence. "
-              "Return pure JSON, not an explanation.\n" + FACTUAL_GENERATION_RULE +
-              "\nSUPPLIED CONTEXT: " + json.dumps(topic_context or {}, ensure_ascii=False) +
-              "\nINDEPENDENT REVIEW: " + json.dumps(review, ensure_ascii=False) +
-              "\nPLAN: " + json.dumps(plan, ensure_ascii=False))
-    text, model = _call_free_llm(prompt, temperature=0.35, max_tokens=16384)
-    revised = _extract_json(text)
-    if not isinstance(revised, dict) or not revised.get("chapters"):
+    """One atomic repair, one chapter per response. Never approve a failed plan.
+
+    The outline is short; the full original chapter and factual context stay intact.
+    A malformed/missing unit aborts without partially changing the original plan.
+    """
+    import copy
+    revised = copy.deepcopy(plan)
+    chapters = plan.get("chapters")
+    if not isinstance(chapters, list) or not chapters:
         raise ValueError("Review-directed rewrite returned malformed plan")
-    original_count = sum(len(ch.get("scenes", [])) for ch in plan["chapters"])
-    revised_count = sum(len(ch.get("scenes", [])) for ch in revised["chapters"])
-    if revised_count != original_count:
-        raise ValueError("Review-directed rewrite changed the scene structure")
-    return revised, model
+    outline = [{"chapter": i, "title": c.get("title", ""),
+                "scene_claims": [{"claim": s.get("claim", s.get("narration", ""))[:180],
+                                  "visual_type": s.get("visual_type", "stock"),
+                                  "visual": s.get("diagram_spec", s.get("keyword", ""))}
+                                 for s in c.get("scenes", [])]} for i, c in enumerate(chapters)]
+    models = []
+    for ci, chapter in enumerate(chapters):
+        prompt = ("Repair ONLY the assigned chapter against the independent review. "
+                  "Return one JSON object with title and scenes, not the entire plan. "
+                  "Preserve scene count, order and existing scene_id values. Each narration "
+                  "is 50-75 natural spoken words, a distinct explanatory step. Keep source "
+                  "attribution and uncertainty. No unsupported measurements, stories or "
+                  "claims. Remove repeated bridges, openings and redundant mechanisms. "
+                  "Use the outline to avoid repeating other chapters. A stock shot cannot "
+                  "show an abstract mechanism. Use the executable schematic contract for "
+                  "those scenes. Pure JSON.\n" + FACTUAL_GENERATION_RULE + "\n" + VISUAL_RULES +
+                  "\nSUPPLIED CONTEXT: " + json.dumps(topic_context or {}, ensure_ascii=False) +
+                  "\nINDEPENDENT REVIEW: " + json.dumps(review, ensure_ascii=False) +
+                  "\nFULL OUTLINE: " + json.dumps(outline, ensure_ascii=False) +
+                  "\nASSIGNED CHAPTER INDEX: " + str(ci) +
+                  "\nCHAPTER: " + json.dumps(chapter, ensure_ascii=False))
+        text, model = _call_free_llm(prompt, temperature=0.3, max_tokens=6500)
+        unit = _extract_json(text)
+        _save_authoring_diagnostic(f"chapter-rewrite-{ci}", unit)
+        if not isinstance(unit, dict) or not isinstance(unit.get("scenes"), list):
+            raise ValueError(f"Chapter {ci} rewrite changed the scene structure or returned malformed JSON")
+        if len(unit["scenes"]) != len(chapter.get("scenes", [])):
+            raise ValueError(f"Chapter {ci} rewrite changed the scene structure")
+        for old, new in zip(chapter["scenes"], unit["scenes"]):
+            if not isinstance(new, dict) or not new.get("narration") or not new.get("keyword"):
+                raise ValueError(f"Chapter {ci} rewrite has incomplete scene")
+            if "scene_id" in old and new.get("scene_id") != old["scene_id"]:
+                raise ValueError(f"Chapter {ci} rewrite changed the scene structure")
+            validate_scene(new)
+        revised["chapters"][ci] = {**chapter, **unit}
+        models.append(model)
+    return revised, "+".join(dict.fromkeys(models))
 
 
 # ─── Full Pipeline ───────────────────────────────────────────────────
