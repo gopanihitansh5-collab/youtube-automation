@@ -1,4 +1,39 @@
-# Anatomy local video adapter
+# Dynamic colour-coded 3D video toolkit
+
+The approved visual direction is the **dynamic 12-second build demo**, not the
+older fixed-camera dial smoke test below. The camera changes angle, a computer
+assembles from separate parts, its fan and flow particles move, and a colour
+legend distinguishes structure, compute and flow. This is original conceptual
+geometry, not a hardware schematic or performance claim. No visible code overlay.
+
+## Approved dynamic demo
+
+Open `dynamic/vertical-preview.html` through a local server, or view
+`dynamic/approved-build-demo.mp4`. Source uses pinned Three.js 0.170.0, included
+locally with its MIT license. No external models, inference, credentials or APIs.
+
+To capture from this directory:
+
+```sh
+cd dynamic
+python capture-preview.py
+ffmpeg -framerate 24 -i frames/%04d.png -c:v libx264 -pix_fmt yuv420p -crf 18 -movflags +faststart new-build-demo.mp4
+node test-motion.mjs
+```
+
+Output is 12 seconds, 720x1280, 24fps, 288 frames, silent. `renderFrame(seconds)`
+controls the exact frame time. Capture needs Chrome and Python websocket-client.
+The optional original motion-helper.mjs exposes validated shot-keyed camera paths,
+assembly easing and the role palette. The approved scene keeps its original
+continuous camera sweep; importing the helper is optional, not claimed execution.
+
+This is an opt-in capability, not automatic episode rotation. Real episodes still
+need topic-specific facts, narration, captions and existing quality/release checks.
+User approved this dynamic visual direction November 24 after rejecting the older
+static diagram. No website or public-video upload is part of this toolkit change.
+
+## Earlier route-validation smoke (not the approved visual target)
+
 
 Opt-in local toolkit addition. Not selected automatically by any production scene planner.
 Upstream: https://github.com/wheresryan22/anatomy

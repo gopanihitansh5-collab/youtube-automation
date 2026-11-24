@@ -1,0 +1,8 @@
+{
+  "asset_type": "anatomy-authored-illustration",
+  "source_url": "https://threejs.org/",
+  "source_commit": "three@0.170.0; original conceptual scene",
+  "license": "MIT (Three.js); original scene source in this repository",
+  "illustration_limits": "Conceptual colour-coded assembly, not a physical hardware diagram or measured performance. Silent style demonstration.",
+  "sha256": "59e15e247c9641fb8903a76d00e6e1f05794ec606ca1dfa76169d82d82bd3976"
+}
