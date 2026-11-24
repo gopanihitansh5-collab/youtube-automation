@@ -1,0 +1,8 @@
+{
+  "asset_type": "anatomy-authored-illustration",
+  "source_url": "https://github.com/wheresryan22/anatomy",
+  "source_commit": "1482e8469b0a9e0d8cc18ea2740a01423d29ae80",
+  "license": "MIT",
+  "illustration_limits": "Upstream dial example adaptation; model coordinates, no calibrated physical measurement; silent technical test, not a finished original episode.",
+  "sha256": "9d18105e359170fbbe2e4cb9eed7be196918c60afd9dd528cd4d33cafd6277e7"
+}

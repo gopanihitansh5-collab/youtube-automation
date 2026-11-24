@@ -1,0 +1,15 @@
+import assert from 'node:assert/strict';
+import {cameraShot,animateBuild,ROLE_COLORS} from './motion-helper.mjs';
+let position,look;
+const camera={position:{set:(...v)=>position=v},lookAt:(...v)=>look=v};
+const shots=[{start:0,end:2,from:[0,1,2],to:[2,3,4],lookFrom:[0,0,0],lookTo:[2,0,0]}];
+cameraShot(camera,shots,1);assert.deepEqual(position,[1,2,3]);assert.deepEqual(look,[1,0,0]);
+cameraShot(camera,shots,-1);assert.deepEqual(position,[0,1,2]);
+cameraShot(camera,shots,9);assert.deepEqual(position,[2,3,4]);
+assert.throws(()=>cameraShot(camera,[],1));
+assert.throws(()=>cameraShot(camera,[{...shots[0],end:0}],1));
+assert.throws(()=>cameraShot(camera,[shots[0],{...shots[0],start:3,end:5}],1));
+assert.equal(new Set(Object.values(ROLE_COLORS)).size,3);
+const mesh={position:{copy(p){Object.assign(this,p)}},rotation:{y:0},scale:{setScalar(v){this.value=v}}};
+animateBuild([{m:mesh,end:{x:1,y:2,z:3},delay:0}],2);assert.equal(mesh.position.y,2);assert.equal(mesh.scale.value,1);
+assert.throws(()=>animateBuild([],1,0));console.log('9 helper assertions passed');
