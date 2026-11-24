@@ -1,0 +1,24 @@
+<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;background:#101a30;color:#fff;font-family:Arial}canvas{position:absolute;inset:0}header{position:absolute;top:70px;left:48px;right:48px;z-index:2}small{color:#62e3d4;letter-spacing:4px;font-size:17px}h1{font-size:54px;line-height:1.05;margin:18px 0}#stage{position:absolute;bottom:160px;left:48px;font-size:29px;font-weight:bold;z-index:2}.legend{position:absolute;bottom:80px;left:48px;right:48px;font-size:18px;display:flex;gap:25px;z-index:2}.dot{display:inline-block;width:12px;height:12px;border-radius:50%;margin-right:8px}</style></head><body><header><small>BUILD A LIVING MACHINE</small><h1>From separate parts<br>to a working system.</h1></header><div id="stage"></div><div class="legend"><span><i class="dot" style="background:#55d6cb"></i>Structure</span><span><i class="dot" style="background:#ffa55c"></i>Compute</span><span><i class="dot" style="background:#a590ff"></i>Flow</span></div><script type="module">
+import * as T from './three.module.js';
+const renderer=new T.WebGLRenderer({antialias:true,preserveDrawingBuffer:true});renderer.setSize(720,1280);renderer.setPixelRatio(1);renderer.shadowMap.enabled=true;renderer.setClearColor(0x101a30);document.body.appendChild(renderer.domElement);
+const scene=new T.Scene();scene.fog=new T.Fog(0x101a30,15,35);scene.add(new T.HemisphereLight(0xb7dfff,0x27303a,2.5));const sun=new T.DirectionalLight(0xffffff,4);sun.position.set(4,9,6);sun.castShadow=true;scene.add(sun);const fill=new T.PointLight(0x57dbd0,30,15);fill.position.set(-4,3,1);scene.add(fill);
+const camera=new T.PerspectiveCamera(34,720/1280,.1,100);const world=new T.Group();world.position.y=-.2;scene.add(world);
+const colors={structure:0x55d6cb,compute:0xffa55c,flow:0xa590ff,dark:0x263b51,cream:0xf3ead8};let parts=[];
+function box(w,h,d,c,x,y,z,delay){const m=new T.Mesh(new T.BoxGeometry(w,h,d),new T.MeshStandardMaterial({color:c,roughness:.38,metalness:.18}));m.position.set(x,y,z);m.castShadow=true;m.receiveShadow=true;world.add(m);if(delay!==undefined)parts.push({m,end:new T.Vector3(x,y,z),delay});return m;}
+box(5,.22,4,colors.dark,0,-1.3,0,0);box(3.5,.18,2.5,colors.structure,0,-1.05,0,.4);box(2.6,.12,1.7,colors.dark,0,-.88,0,1);box(.85,.22,.85,colors.compute,-.3,-.69,0,2);for(let j=0;j<12;j++)box(.05,.06,.1,colors.cream,-.7+j*.073,-.72,.51,2.1);
+for(let j=0;j<4;j++)box(.18,.58,1.1,colors.flow,.65+j*.27,-.55,0,2.8+j*.15);
+box(2.8,2.4,.22,colors.cream,0,1,-.45,3.6);const screen=box(2.35,1.72,.09,colors.dark,0,1.07,-.29,4.2);box(.32,.65,.4,colors.structure,0,-.34,-.6,3.3);box(1.2,.12,.8,colors.structure,0,-.68,-.55,3.2);
+const glow=new T.PointLight(0x55d6cb,0,4);glow.position.set(0,1,.3);world.add(glow);
+for(let j=0;j<5;j++){const bar=box(.23,.12+j*.14,.03,colors.flow,-.72+j*.36,.62+j*.07,-.17,5.0+j*.08);}
+const display=new T.Mesh(new T.PlaneGeometry(2.1,1.5),new T.MeshBasicMaterial({color:0x5bdfce}));display.position.set(0,1.07,-.235);world.add(display);
+const fan=new T.Group();fan.position.set(-1.4,-.48,.3);world.add(fan);for(let j=0;j<6;j++){const b=new T.Mesh(new T.BoxGeometry(.14,.07,.68),new T.MeshStandardMaterial({color:colors.compute}));b.position.set(Math.sin(j*Math.PI/3)*.23,0,Math.cos(j*Math.PI/3)*.23);b.rotation.y=j*Math.PI/3;fan.add(b)}
+const keyboard=new T.Group();world.add(keyboard);for(let row=0;row<4;row++)for(let col=0;col<11;col++){const key=box(.19,.09,.2,colors.cream,-1.14+col*.225,-1.02,1.05+row*.24,4.6+row*.1);}
+let packets=[];for(let j=0;j<22;j++){let m=new T.Mesh(new T.SphereGeometry(.045,8,8),new T.MeshBasicMaterial({color:colors.flow}));world.add(m);packets.push(m)}
+const floor=new T.Mesh(new T.PlaneGeometry(200,200),new T.MeshStandardMaterial({color:0x101a30,roughness:.9}));floor.rotation.x=-Math.PI/2;floor.position.y=-1.46;floor.receiveShadow=true;scene.add(floor);
+function ease(t){return t*t*(3-2*t)}const clamp=x=>Math.max(0,Math.min(1,x));
+window.renderFrame=t=>{for(const p of parts){let v=ease(clamp((t-p.delay)/1.1));p.m.position.copy(p.end);p.m.position.y+=(1-v)*4;p.m.rotation.y=(1-v)*.5;p.m.scale.setScalar(Math.max(.001,v));}
+let live=clamp((t-5.5)/1.2);glow.intensity=live*3;display.visible=t>4.6;display.scale.setScalar(Math.max(.001,live));fan.scale.setScalar(Math.max(.001,clamp((t-2.2))));fan.rotation.y=t*t*1.5;
+packets.forEach((m,j)=>{m.visible=t>5.8;let v=((t*.55+j/22)%1);m.position.set(-1.4+2.8*v,-.54+Math.sin(v*Math.PI)*.18,.68);});
+let angle=-.7+1.35*ease(clamp(t/12));let radius=14.2-1.4*ease(clamp(t/12));camera.position.set(Math.sin(angle)*radius,5.0+Math.sin(t*.35)*1.5,Math.cos(angle)*radius);camera.lookAt(0,.8,0);world.rotation.y=Math.sin(t*.3)*.07;
+document.getElementById('stage').textContent=t<2?'01 / Assemble the foundation':t<4?'02 / Add the working parts':t<6?'03 / Connect the machine':'04 / Power on. Follow the flow.';renderer.render(scene,camera);};window.renderFrame(0);
+</script></body></html>
