@@ -1,0 +1,7 @@
+frames/
+__pycache__/
+vertical-preview.html
+source/examples/dial-indicator/dial-indicator-light.html
+composed-*.mp4
+composed-*.receipt.json
+composed-contact.jpg
