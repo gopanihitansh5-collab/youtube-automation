@@ -14,7 +14,7 @@ jobs:
         with:
           python-version: '3.11'
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg fonts-dejavu-core
-      - run: pip install requests Pillow google-auth google-auth-oauthlib google-api-python-client cryptography gspread
+      - run: pip install requests Pillow google-auth google-auth-oauthlib google-api-python-client cryptography gspread tzdata
       - run: python -m unittest discover -s tests
         env:
           EDITOR_INTEGRATION: "1"
